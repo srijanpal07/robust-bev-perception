@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+
+# Model checkpoints and large files
+outputs/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.h5
+
+# Data
+data/
+datasets/
+*.bin
+*.npy
+*.npz
+
+# Logs and experiment outputs
+outputs/logs/
+outputs/runs/
+wandb/
+*.log
+lightning_logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# Isaac Sim
+_build/
+_isaac_sim/

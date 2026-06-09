@@ -1,0 +1,24 @@
+finetune:
+  # Pretrained checkpoint to start from
+  checkpoint: outputs/checkpoints/best_model.pt
+  # Matched BEVFormer windows (5m threshold gives 426 windows — best coverage)
+  bevformer_boxes: outputs/results/bevformer_instance_boxes_5m.json
+  # Where to save the fine-tuned model
+  output_ckpt: outputs/checkpoints/best_model_finetuned.pt
+  # Fraction of instances (not windows) held out for validation — prevents leakage
+  val_fraction: 0.2
+  # Freeze BEV/crop encoders: they see LiDAR which is identical to training
+  freeze_encoders: true
+
+training:
+  seed: 552702
+  epochs: 30
+  batch_size: 8
+  lr: 5.0e-5          # 4× lower than original to avoid destroying pretrained weights
+  grad_clip: 1.0
+  huber_delta: 0.5
+  patience: 10        # early stopping: stop if no val improvement for this many epochs
+
+data:
+  data_dir: /mnt/datasets/bev_data
+  meta_path: /mnt/datasets/bev_data/metadata.json

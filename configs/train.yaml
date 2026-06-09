@@ -1,0 +1,48 @@
+data:
+  data_dir: /mnt/datasets/bev_data
+  meta_path: /mnt/datasets/bev_data/metadata.json
+  nuscenes_version: full   # 'mini' or 'full' — selects the official nuScenes scene split
+  use_subframes: false  # (#27) interleave near+far BEVs per keyframe → doubles T for model
+  delta_bev: false       # (#28) append frame-to-frame BEV diffs as extra channels → doubles bev_channels
+  add_kinematics: true   # (#21/#22) append [dt, vx̂, vŷ] to box features → box_dim 7→10
+  box_noise: true       # inject camera-only detector noise into box_params during training (see src/box_noise.py)
+  use_kalman_velocity: false  # use Kalman-filtered velocity for vx̂/vŷ instead of naive finite-diff
+  residual_velocity: true    # predict (GT_vel − noisy_vhat) instead of full velocity; requires add_kinematics: true
+  box_noise_params:
+    noise_scale: 0.5          # global σ multiplier: 0=off, 1=calibrated camera noise, 2=double
+    depth_outlier_prob: 0.015 # per-frame probability of a sporadic gross depth error
+    yaw_pi_flip_prob: 0.001   # per-frame probability of a 180° heading flip (±90° flip = 40% of this)
+
+training:
+  seed: 552702       # CSCI 5527: Version 02
+  T: 4               # temporal window length (number of consecutive frames)
+  batch_size: 10
+  accum_steps: 4   # gradient accumulation — effective batch = batch_size × accum_steps
+  epochs: 30
+  lr: 2.0e-4
+  weight_decay_encoder:  1.0e-3   # BEV encoder + crop encoder conv weights (biases/BN params excluded)
+  weight_decay_temporal: 1.0e-2   # Transformer weight matrices (1e-3 if using GRU)
+  weight_decay_other:    0.0      # box projection + prediction head
+  split_mode: scene     # 'scene' (official nuScenes splits) or 'temporal' (last N frames per scene)
+  val_last_n: 5      # only used when split_mode: temporal
+  scheduler: cosine  # 'cosine' (CosineAnnealingLR) or 'plateau' (ReduceLROnPlateau)
+  grad_clip: 1.0     # max gradient norm; set to 0 to disable
+  huber_delta: 0.5  # Huber loss transition point; L2 below ~0.22 m/s (vx) / ~0.76 m/s (vy), L1 above
+
+model:
+  hidden_size: 318
+  box_dim: 7
+  dropout: 0.35
+  bev_encoder: lightweight    # 'lightweight' (DS-block CNN) | 'resnet18'
+  crop_encoder: lightweight  # 'lightweight' (3-layer CNN) | 'efficientnet' (pretrained EfficientNet-B0)
+  temporal_model: transformer      # (#17/#18) 'gru' | 'transformer' (learnable PE)
+  transformer_nhead: 4             # attention heads (must divide _COMBINED_DIM=448 evenly)
+  transformer_num_layers: 2        # number of TransformerEncoderLayer stacks
+  transformer_dim_feedforward: 512 # inner FFN width inside each encoder layer
+  bev_channels: 22   # 6 scalar (#1-4) + 16 height bins (#26); must match save_bev.py BEV_N_CHANNELS
+  crop_channels: 22  # crops are extracted from the BEV so channel count is identical
+
+output:
+  ckpt_dir:    outputs/checkpoints
+  plots_dir:   outputs/plots
+  results_dir: outputs/results
