@@ -1,18 +1,22 @@
 # Robust BEV Perception under Sensor Degradation
 
-> Graceful, predictable degradation across the full sensor quality spectrum — from dense LiDAR to camera-only — via world-model-inspired multi-modal training.
+> Graceful, predictable degradation across the full sensor quality spectrum — from dense LiDAR to camera-only — via stochastic dropout training, language-grounded modality gating, and zero-shot sim-to-real transfer validation.
 
 ## The Problem
 
-Modern AV perception systems face a fundamental deployment problem: they are trained on expensive, high-quality sensor data — dense 32-beam LiDAR, calibrated cameras, and radar — but in the real world sensors degrade continuously due to weather (fog scatters LiDAR, rain blinds cameras), hardware aging, or cost constraints (a $200 4-beam LiDAR behaves nothing like the $5000 unit the model trained on). Current approaches either hard-switch between modalities when one fails, or fuse sensors assuming all are healthy — both strategies break unpredictably at the boundary.
+LiDAR-equipped AV systems experience structured sensor degradation in adverse weather and hardware wear — fog scatters 60–80% of LiDAR returns, rain blinds cameras, dust storms degrade both. This creates a training-inference gap: models trained on clean 32-beam LiDAR data fail **silently and unpredictably** when deployed sensors degrade, because the degraded-sensor distribution was never seen during training. Current approaches either hard-switch between modalities when one fails (brittle boundary) or fuse sensors assuming all are healthy (no graceful fallback). Neither handles the continuous degradation spectrum that real deployments encounter.
+
+This is not a solved problem. Waymo's Gen 6 (2026) added mechanical sensor cleaning and redundancy hardware specifically to compensate for this software gap. Foundation models and scale alone do not fix it — they still require training data covering the degradation distribution.
 
 ## The Approach
 
-We train a unified perception framework on the full high-quality sensor stack — dense LiDAR, camera, and 4D radar — while simultaneously simulating a continuous spectrum of sensor degradation at training time through stochastic LiDAR beam dropout, camera-detector noise injection, and radar sparsity augmentation. The model learns a shared Bird's Eye View (BEV) latent representation, inspired by world models, that encodes scene geometry and agent motion regardless of which sensors are available at any given moment.
+We train a unified perception framework on real nuScenes sensor data (dense LiDAR, camera, radar) while injecting a continuous spectrum of synthetic degradation at training time via **stochastic LiDAR beam dropout** — randomly sampling beam counts {32, 16, 8, 4, 0} per batch. The model learns a shared BEV latent representation that encodes scene geometry and agent motion regardless of current sensor quality.
 
-At inference, a lightweight degradation-predictor network monitors real-time sensor quality per modality and produces a soft confidence score that continuously re-weights each modality's contribution to the shared BEV latent — smoothly transitioning from a full (dense LiDAR + camera + radar) configuration down through (sparse LiDAR + camera), (camera + radar), and ultimately (camera only) without hard switching, distribution shift, or catastrophic failure. The unified temporal transformer then operates on this robust latent representation to predict per-agent future trajectories, not just instantaneous velocity, making the output directly useful for downstream planning.
+At inference, a **language-grounded degradation estimator** (CLIP ViT-L/14, LoRA fine-tuned on Isaac Sim data) takes front-camera frames and produces a semantic quality embedding — cameras can see weather conditions (fog, haze, rain) even when LiDAR cannot measure its own degradation. This embedding drives a **soft modality gating network** that continuously re-weights LiDAR vs. camera BEV features, smoothly degrading from full-stack perception down to camera-only without hard switching.
 
-The entire framework is validated on nuScenes using real sensor data and extended to physics-accurate adverse weather scenarios generated in NVIDIA Isaac Sim, where ground-truth degradation conditions can be precisely controlled — something no existing dataset provides.
+**Sim-to-real transfer:** The model is trained exclusively on real nuScenes data. Physics-accurate degraded point clouds are generated in NVIDIA Isaac Sim (fog, rain, 4-beam hardware, LiDAR failure). We evaluate zero-shot — no Isaac Sim data at training time — measuring how well stochastic dropout training generalizes to physically accurate degradation.
+
+The temporal transformer outputs per-agent future trajectories (multi-step waypoints), benchmarked on nuScenes motion forecasting, making the output directly useful for downstream planning.
 
 ## Baseline
 
@@ -60,8 +64,15 @@ See [RESEARCH.md](RESEARCH.md) for the full research plan, short-term and long-t
 
 ## Related Work
 
-- [LEROjD (ECCV 2024)](https://arxiv.org/abs/2409.05564) — LiDAR-train / radar-infer knowledge transfer
+**Direct competitors (2025–2026):**
+- [MoME (CVPR 2025)](https://arxiv.org/abs/2503.19776) — discrete expert routing for sensor failure; we use soft language-grounded gating
+- [RESBev (arXiv 2026)](https://arxiv.org/abs/2603.09529) — latent world model for BEV robustness; we operate at training policy + gating level
+
+**Foundations:**
+- [LEROjD (ECCV 2024)](https://arxiv.org/abs/2409.05564) — LiDAR-train / radar-infer transfer; binary, not continuous
 - [BEVWorld (2024)](https://arxiv.org/html/2407.05679v3) — multimodal world model in BEV latent space
 - [Cocoon (2024)](https://arxiv.org/html/2410.12592v1) — uncertainty-aware sensor fusion
-- [DriveMoE (2025)](https://arxiv.org/pdf/2505.16278) — mixture-of-experts for autonomous driving
-- [Cam4DOcc (CVPR 2024)](https://openaccess.thecvf.com/content/CVPR2024/papers/Ma_Cam4DOcc_Benchmark_for_Camera-Only_4D_Occupancy_Forecasting_in_Autonomous_Driving_CVPR_2024_paper.pdf) — camera-only 4D occupancy forecasting
+
+**VLM / language for AV:**
+- [DriveX @ CVPR 2026](https://drivex-workshop.github.io/cvpr2026/) — foundation models + adverse weather perception
+- [AUTOPILOT @ CVPR 2026](https://www.autopilot-cvpr.net/) — VLMs for safety-critical AV perception
