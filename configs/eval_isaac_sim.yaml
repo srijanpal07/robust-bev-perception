@@ -1,0 +1,29 @@
+model:
+  T:              3
+  box_dim:        10
+  hidden_size:    256
+  dropout:        0.0
+  bev_encoder:    resnet18
+  crop_encoder:   lightweight
+  bev_channels:   22
+  crop_channels:  22
+  temporal_model: transformer
+  nhead:          4
+  num_layers:     2
+  dim_feedforward: 512
+
+eval:
+  batch_size:  32
+  num_workers: 4
+  # Degradation conditions to evaluate (generated in Isaac Sim)
+  conditions:
+    - clear_32beam
+    - clear_16beam
+    - clear_8beam
+    - clear_4beam
+    - fog_light
+    - fog_moderate
+    - fog_heavy
+    - rain
+    - dust_storm
+    - lidar_failure   # camera-only fallback

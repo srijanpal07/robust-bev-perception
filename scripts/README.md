@@ -2,6 +2,33 @@
 
 All scripts are run from the **project root**, not from inside `scripts/`.
 
+## Canonical entrypoints
+
+| Script | Purpose | Notes |
+|---|---|---|
+| `scripts/train/train.py` | **Training** — YAML-driven, velocity + trajectory tasks | Use this going forward |
+| `scripts/eval/eval_degradation_curve.py` | Degradation sweep (ADE/FDE/ECE vs beam count) | Stub — needs `beam_degradation.py` |
+| `scripts/eval/eval_calibration.py` | Calibration sweep + reliability diagrams | Stub — needs `TrajectoryHead` |
+| `scripts/eval/eval_isaac_sim.py` | Cross-domain robustness evaluation | Stub — needs Isaac Sim scenes |
+
+## Legacy scripts (original baseline — still functional)
+
+`scripts/train.py` and `scripts/infer.py` are the original training and inference scripts from the baseline codebase. They are kept intact and still work — use them if you need the original Huber-loss velocity training loop or the full inference report with BEVFormer comparison. The new `scripts/train/train.py` replaces them for the research contributions.
+
+```
+scripts/
+├── train/train.py             # ← NEW canonical training entrypoint
+├── eval/                      # ← NEW eval scripts (stubs)
+├── baselines/                 # ← NEW (stubs wrapping old baseline scripts)
+│
+│  Legacy — original baseline:
+├── train.py                   # original velocity training (Huber loss, full checkpoint)
+├── infer.py                   # original inference + BEVFormer comparison
+├── visualize.py               # Rerun 3D visualizer
+├── save_bev.py                # generate BEV training data
+└── …                          # dataset prep, BEVFormer pipeline (see below)
+```
+
 ```
 scripts/
 ├── prepare_dataset.py             # Merge extracted blob directories into devkit-compatible layout

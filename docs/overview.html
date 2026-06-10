@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robust BEV Perception — Research Overview</title>
+<style>
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --card:    #21242f;
+    --border:  #2e3244;
+    --accent:  #5b8dee;
+    --green:   #3ecf8e;
+    --red:     #f0614c;
+    --yellow:  #f5a623;
+    --purple:  #b78bfa;
+    --text:    #e2e8f0;
+    --muted:   #8892a4;
+    --code-bg: #141720;
+    --radius:  8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    padding: 40px 24px;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Header ──────────────────────────────────── */
+  header {
+    max-width: 980px;
+    margin: 0 auto 48px;
+    border-left: 4px solid var(--accent);
+    padding-left: 20px;
+  }
+  header h1 { font-size: 2rem; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
+  header .subtitle { font-size: 1.05rem; color: var(--text); margin-bottom: 6px; }
+  header p  { color: var(--muted); font-size: 0.92rem; margin-bottom: 8px; }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-right: 6px;
+    margin-top: 8px;
+  }
+  .badge-blue   { background: #1a2a4a; color: var(--accent); }
+  .badge-green  { background: #1a3b2e; color: var(--green); }
+  .badge-amber  { background: #2e2310; color: var(--yellow); }
+  .badge-purple { background: #2a1e3b; color: var(--purple); }
+  .badge-gray   { background: var(--card); color: var(--muted); }
+  .badge-red    { background: #2e1414; color: var(--red); }
+
+  /* ── Layout ──────────────────────────────────── */
+  .container { max-width: 980px; margin: 0 auto; }
+
+  /* ── Section ─────────────────────────────────── */
+  section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .section-header h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); }
+  .section-header .tag {
+    font-size: 0.78rem;
+    color: var(--muted);
+    background: var(--code-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    white-space: nowrap;
+  }
+  .section-header .desc {
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .section-body { padding: 20px; }
+
+  /* ── Summary cards ───────────────────────────── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .summary-card .val {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+    font-family: 'Consolas', 'Fira Code', monospace;
+  }
+  .summary-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+  /* ── Contribution cards ──────────────────────── */
+  .contrib-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 4px;
+  }
+  .contrib-card {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .contrib-card .contrib-label {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .contrib-card h3 { font-size: 0.92rem; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+  .contrib-card p  { font-size: 0.855rem; color: var(--muted); line-height: 1.6; }
+  .contrib-card.ablation { border-color: #3a3050; }
+  .contrib-card.ablation .contrib-label { color: var(--purple); }
+
+  /* ── Step list ───────────────────────────────── */
+  .step-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  .step-item {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 2.4rem 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  .step-n {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .step-n.green  { color: var(--green); }
+  .step-n.purple { color: var(--purple); }
+  .step-n.amber  { color: var(--yellow); }
+  .step-item h4 { font-size: 0.92rem; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .step-item p  { font-size: 0.875rem; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+  .step-item p:first-of-type { margin-top: 0; }
+  .step-item ul { font-size: 0.875rem; color: var(--muted); line-height: 1.8; padding-left: 18px; margin-top: 6px; }
+
+  /* ── Tables ──────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th {
+    background: var(--code-bg);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(91,141,238,0.04); }
+  td:first-child {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--text);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  td.highlight { color: var(--green); font-weight: 600; }
+  td.warn-cell { color: var(--yellow); }
+
+  /* ── Code ────────────────────────────────────── */
+  pre, code { font-family: 'Consolas', 'Fira Code', monospace; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: 8px 0;
+    color: #a8b4cf;
+  }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.87em;
+    color: #7ec8f5;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
+
+  /* ── Callout boxes ───────────────────────────── */
+  .note {
+    background: #1e2e4a;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    color: #a8c0e8;
+    margin: 12px 0;
+  }
+  .note strong { color: var(--accent); }
+
+  .warn {
+    background: #2e2310;
+    border-left: 3px solid var(--yellow);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    color: #d4b483;
+    margin: 12px 0;
+  }
+  .warn strong { color: var(--yellow); }
+
+  .success {
+    background: #1a3020;
+    border-left: 3px solid var(--green);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    color: #8eddb8;
+    margin: 12px 0;
+  }
+  .success strong { color: var(--green); }
+
+  .purple-note {
+    background: #211830;
+    border-left: 3px solid var(--purple);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+    color: #c4a8e8;
+    margin: 12px 0;
+  }
+  .purple-note strong { color: var(--purple); }
+
+  /* ── TOC ─────────────────────────────────────── */
+  .toc-list { list-style: none; counter-reset: toc; }
+  .toc-list li {
+    counter-increment: toc;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.92rem;
+  }
+  .toc-list li:last-child { border-bottom: none; }
+  .toc-list li::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    min-width: 2rem;
+  }
+  .toc-list a { color: var(--muted); transition: color 0.2s; }
+  .toc-list a:hover { color: var(--accent); text-decoration: none; }
+
+  /* ── Two-column layout ───────────────────────── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── Metric pill ─────────────────────────────── */
+  .metric-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .metric-pill {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+  }
+  .metric-pill.green { color: var(--green); }
+  .metric-pill.purple { color: var(--purple); }
+
+  /* ── Timeline month ──────────────────────────── */
+  .month-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .month-block h3 {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    margin-bottom: 10px;
+    letter-spacing: 0.04em;
+  }
+  .month-block ul { padding-left: 18px; }
+  .month-block li { font-size: 0.875rem; color: var(--muted); line-height: 1.8; }
+  .month-block li strong { color: var(--text); }
+
+  /* ── File tree ───────────────────────────────── */
+  .file-tree {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 2.0;
+    color: #a8b4cf;
+  }
+  .file-tree .dir  { color: var(--accent); font-weight: 600; }
+  .file-tree .new  { color: var(--green); }
+  .file-tree .stub { color: var(--yellow); }
+  .file-tree .note-inline { color: var(--muted); font-style: italic; }
+
+  /* ── System flow diagram ─────────────────────── */
+  .flow-outer { display: flex; flex-direction: column; align-items: stretch; }
+  .flow-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    background: var(--code-bg);
+  }
+  .flow-block.training { border-color: #2a4a7a; }
+  .flow-block.gating   { border-color: #3a2e14; }
+  .flow-block.output   { border-color: #1e3d28; }
+  .flow-block.result   { background: #17122a; border-color: #3d2a62; }
+  .flow-connector {
+    width: 2px;
+    height: 30px;
+    background: var(--border);
+    margin: 0 auto;
+    position: relative;
+  }
+  .flow-connector::after {
+    content: '▼';
+    position: absolute;
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+  .flow-label {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .flow-label.blue   { color: var(--accent); }
+  .flow-label.green  { color: var(--green); }
+  .flow-label.amber  { color: var(--yellow); }
+  .flow-label.purple { color: var(--purple); }
+  .flow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+  .flow-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 0.8rem;
+    color: var(--text);
+    font-family: 'Consolas', 'Fira Code', monospace;
+    white-space: nowrap;
+  }
+  .flow-chip.acc  { border-color: #2a4a7a; color: var(--accent); }
+  .flow-chip.grn  { border-color: #1e3d28; color: var(--green); }
+  .flow-chip.amb  { border-color: #3a2e14; color: var(--yellow); }
+  .flow-chip.pur  { border-color: #3d2a62; color: var(--purple); }
+  .flow-note {
+    font-size: 0.855rem;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+  .flow-eq {
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.88rem;
+    color: #a8c8e8;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  .flow-infer-row {
+    display: grid;
+    grid-template-columns: 1fr 32px 1fr 32px 1fr;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .flow-infer-cell {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    text-align: center;
+  }
+  .flow-infer-cell.hi  { border-color: var(--green); }
+  .flow-infer-cell.mid { border-color: var(--yellow); }
+  .flow-infer-cell.lo  { border-color: var(--accent); }
+  .fi-level { font-size: 0.82rem; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .fi-q     { font-family: monospace; font-size: 0.78rem; }
+  .fi-sig   { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+  .flow-infer-cell.hi  .fi-q { color: var(--green); }
+  .flow-infer-cell.mid .fi-q { color: var(--yellow); }
+  .flow-infer-cell.lo  .fi-q { color: var(--accent); }
+  .flow-arrow-r { font-size: 1.3rem; color: var(--muted); text-align: center; }
+  @media (max-width: 600px) {
+    .flow-infer-row { grid-template-columns: 1fr; }
+    .flow-arrow-r { transform: rotate(90deg); }
+  }
+
+  /* ── Footer ──────────────────────────────────── */
+  footer {
+    max-width: 980px;
+    margin: 48px auto 0;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Robust BEV Perception under Sensor Degradation</h1>
+  <p class="subtitle">Calibrated trajectory forecasting across the full LiDAR quality spectrum</p>
+  <p>A single model trained on real nuScenes data maintains accurate, calibrated trajectory predictions
+     as LiDAR degrades from 32 beams to 0 — validated via stochastic dropout training,
+     uncertainty-aware modality gating, and physics-accurate cross-domain evaluation in Isaac Sim.</p>
+  <div>
+    <span class="badge badge-blue">nuScenes</span>
+    <span class="badge badge-green">Isaac Sim 5.1.0</span>
+    <span class="badge badge-blue">PyTorch</span>
+    <span class="badge badge-amber">Target: RA-L 2026</span>
+    <span class="badge badge-purple">CVPR 2027 stretch</span>
+    <span class="badge badge-gray">RTX Pro 5000 Ada · 32 GB</span>
+    <span class="badge badge-gray">Ubuntu 22.04</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ── Summary cards ─────────────────────────── -->
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="val">C1–C4</div>
+      <div class="lbl">Core contributions<br>+ 1 exploratory ablation</div>
+    </div>
+    <div class="summary-card">
+      <div class="val">6</div>
+      <div class="lbl">Degradation levels<br>32 → 16 → 8 → 4 → 2 → 0</div>
+    </div>
+    <div class="summary-card">
+      <div class="val">3</div>
+      <div class="lbl">Primary metrics<br>ADE · FDE · ECE</div>
+    </div>
+    <div class="summary-card">
+      <div class="val">3 mo</div>
+      <div class="lbl">Timeline<br>to RA-L submission</div>
+    </div>
+    <div class="summary-card">
+      <div class="val">3 s</div>
+      <div class="lbl">Prediction horizon<br>6 steps × 0.5 s</div>
+    </div>
+    <div class="summary-card">
+      <div class="val">RA-L</div>
+      <div class="lbl">Primary venue<br>submit Aug–Oct 2026</div>
+    </div>
+  </div>
+
+  <!-- ── Table of Contents ─────────────────────── -->
+  <section>
+    <div class="section-header">
+      <h2>Contents</h2>
+    </div>
+    <div class="section-body">
+      <ol class="toc-list">
+        <li><a href="#problem">The Problem — Why This Matters</a></li>
+        <li><a href="#contributions">Research Contributions (C1–C4 + Ablation)</a></li>
+        <li><a href="#system-overview">System Overview — Training + Inference Pipeline</a></li>
+        <li><a href="#architecture">Model Architecture</a></li>
+        <li><a href="#evaluation">Evaluation Plan</a></li>
+        <li><a href="#timeline">3-Month Timeline</a></li>
+        <li><a href="#novelty">Novelty vs. Prior Work</a></li>
+        <li><a href="#related">Related Work</a></li>
+        <li><a href="#venues">Target Venues</a></li>
+        <li><a href="#structure">Repository Structure</a></li>
+        <li><a href="#hardware">Hardware &amp; Tools</a></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ── The Problem ───────────────────────────── -->
+  <section id="problem">
+    <div class="section-header">
+      <span class="tag">SECTION 01</span>
+      <h2>The Problem — Why This Matters</h2>
+      <span class="desc">The training-inference gap that causes silent AV perception failure</span>
+    </div>
+    <div class="section-body">
+      <div class="warn">
+        <strong>Core issue:</strong> Models trained on clean 32-beam LiDAR data fail silently and
+        unpredictably when deployed sensors degrade continuously — because the degraded-sensor
+        distribution was never seen during training.
+      </div>
+
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="step-item" style="display: block; padding: 16px;">
+          <h4 style="color: var(--accent); margin-bottom: 8px;">Waymo Gen 6 (2026)</h4>
+          <p>13 cameras + 4 LiDARs + 6 radars. Added mechanical sensor cleaning, hydrophobic
+             coatings, and modular sensors specifically to handle weather-induced degradation.
+             Software stack cannot degrade gracefully — it needs clean data.</p>
+        </div>
+        <div class="step-item" style="display: block; padding: 16px;">
+          <h4 style="color: var(--accent); margin-bottom: 8px;">Tesla (2026)</h4>
+          <p>Cameras only — avoids LiDAR entirely. Commercially operating. But loses geometric
+             precision that LiDAR provides. The sensor debate remains unresolved.</p>
+        </div>
+      </div>
+
+      <div class="step-list">
+        <div class="step-item">
+          <span class="step-n">❶</span>
+          <div>
+            <h4>LiDAR degrades continuously, not suddenly</h4>
+            <p>Fog scatters 60–80% of LiDAR returns. Rain and dust storms degrade further.
+               Hardware ages. Low-cost sensors have fewer beams from the start.
+               None of this is binary — it's a continuous quality spectrum.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">❷</span>
+          <div>
+            <h4>Current approaches break at the boundary</h4>
+            <p>Hard-switch (MoME-style): brittle — fails unpredictably at the modality threshold.
+               Assume-all-healthy fusion (BEVFusion): produces confidently wrong outputs.
+               Post-hoc recovery (RESBev): adds a wrapper but doesn't train the model to handle degradation.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">❸</span>
+          <div>
+            <h4>Foundation models + scale don't fix this</h4>
+            <p>Large pre-trained models still require training data covering the degradation
+               distribution. Without it, they hallucinate on inputs outside their training domain.
+               Stochastic dropout training is a principled, data-efficient way to synthesize that coverage.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">❹</span>
+          <div>
+            <h4>Planners need calibrated uncertainty, not just accuracy</h4>
+            <p>A motion planner receiving a degraded trajectory prediction with no confidence estimate
+               is flying blind. A planner receiving "prediction: x±2 m at 3 s, confidence: 0.3" can
+               brake conservatively. <strong>Calibrated graceful degradation</strong> is the goal.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Contributions ─────────────────────────── -->
+  <section id="contributions">
+    <div class="section-header">
+      <span class="tag">SECTION 02</span>
+      <h2>Research Contributions</h2>
+      <span class="desc">C1–C4 are core claims · Ablation is exploratory</span>
+    </div>
+    <div class="section-body">
+      <div class="contrib-grid">
+
+        <div class="contrib-card">
+          <div class="contrib-label">C1 · DEGRADATION SIMULATION</div>
+          <h3>LiDAR Degradation Pipeline</h3>
+          <p>Beam reduction on nuScenes HDL-32E: keep every N-th elevation ring to simulate
+             {32, 16, 8, 4, 2} beam LiDAR. Physics-accurate degradation (fog, rain, dust, hardware failure)
+             generated in NVIDIA Isaac Sim. Released as a community benchmark for nuScenes degradation levels.</p>
+        </div>
+
+        <div class="contrib-card">
+          <div class="contrib-label">C2 · TRAINING STRATEGY</div>
+          <h3>Stochastic Beam Dropout Training</h3>
+          <p>Randomly sample a beam count from {32, 16, 8, 4, 2, 0} per training batch.
+             The BEV encoder learns to extract useful geometry from variable-density point clouds.
+             Key claim: training diversity alone buys graceful degradation at inference —
+             no architectural change required.</p>
+        </div>
+
+        <div class="contrib-card">
+          <div class="contrib-label">C3 · GATING + CALIBRATION</div>
+          <h3>Uncertainty-Aware Modality Gating</h3>
+          <p>Lightweight degradation-predictor head estimates LiDAR quality score <em>q</em> ∈ [0, 1]
+             from point cloud statistics. Soft-weights LiDAR vs. camera BEV features continuously.
+             <strong>Calibrated output:</strong> trajectory head outputs a Gaussian distribution —
+             uncertainty widens as <em>q</em> → 0. Measured via ECE and NLL.</p>
+        </div>
+
+        <div class="contrib-card">
+          <div class="contrib-label">C4 · DOWNSTREAM TASK</div>
+          <h3>Trajectory Forecasting under Degradation</h3>
+          <p>Extends velocity head to multi-step waypoint prediction with uncertainty:
+             (μ, log σ) per future position. Benchmarked on nuScenes motion forecasting
+             (minADE, minFDE, MissRate). First work to connect continuous hardware degradation
+             directly to calibrated trajectory output — the metric planners actually consume.</p>
+        </div>
+
+        <div class="contrib-card ablation">
+          <div class="contrib-label">ABLATION · EXPLORATORY</div>
+          <h3>Language-Grounded Gating (CLIP)</h3>
+          <p>CLIP ViT-L/14 (LoRA fine-tuned) on Isaac Sim camera renders → semantic degradation
+             embedding → gating signal. Cameras can see weather even when LiDAR cannot measure
+             its own degradation. <strong>Only promote to a contribution if results clearly beat the
+             geometric gating baseline.</strong> Reviewer question to answer first: "why not a simpler classifier?"</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── System Overview ──────────────────────────── -->
+  <section id="system-overview">
+    <div class="section-header">
+      <span class="tag">SECTION 02.5</span>
+      <h2>System Overview</h2>
+      <span class="desc">Training strategy + full inference pipeline at a glance</span>
+    </div>
+    <div class="section-body">
+      <div class="flow-outer">
+
+        <!-- Training -->
+        <div class="flow-block training">
+          <div class="flow-label blue">TRAINING DATA</div>
+          <div class="flow-chips">
+            <span class="flow-chip acc">Real nuScenes · 32-beam HDL-32E LiDAR</span>
+            <span class="flow-chip acc">6 cameras · box detections</span>
+          </div>
+          <div class="flow-chips" style="margin-top: 6px;">
+            <span class="flow-chip grn">+ Stochastic beam dropout (C2)</span>
+            <span class="flow-chip grn">sample {32, 16, 8, 4, 2, 0} per batch</span>
+            <span class="flow-chip grn">0 beams = camera-only batches</span>
+          </div>
+          <div class="flow-note">Trains the encoder on the full degradation spectrum using only real nuScenes data — synthetic dropout synthesizes what the model needs to see without collecting real sparse-LiDAR scenes.</div>
+        </div>
+
+        <div class="flow-connector"></div>
+
+        <!-- BEV Encoder -->
+        <div class="flow-block">
+          <div class="flow-label blue">BEV ENCODER  ·  C1 + C2</div>
+          <div class="flow-chips">
+            <span class="flow-chip">ResNet18 on 500×500 BEV</span>
+            <span class="flow-chip">CropEncoder on 64×64</span>
+            <span class="flow-chip">Box MLP — 10 → 64-dim</span>
+          </div>
+          <div class="flow-note">Concatenated features: 256 + 128 + 64 = 448-dim per frame.<br>Learns <em>P(scene representation | any sensor quality level)</em>.</div>
+        </div>
+
+        <div class="flow-connector"></div>
+
+        <!-- Temporal -->
+        <div class="flow-block">
+          <div class="flow-label blue">TEMPORAL AGGREGATION</div>
+          <div class="flow-chips">
+            <span class="flow-chip">2-layer · 4-head Transformer</span>
+            <span class="flow-chip">T = 3 frames history</span>
+            <span class="flow-chip">learned positional encoding</span>
+          </div>
+          <div class="flow-note">Mean-pool over T steps → 256-dim context vector. GRU variant available as a faster ablation baseline.</div>
+        </div>
+
+        <div class="flow-connector"></div>
+
+        <!-- Gating -->
+        <div class="flow-block gating">
+          <div class="flow-label amber">MODALITY GATING  ·  C3</div>
+          <div class="flow-chips">
+            <span class="flow-chip amb">pc stats → quality score q ∈ [0, 1]</span>
+            <span class="flow-chip">density · range histogram · intensity variance</span>
+          </div>
+          <div class="flow-eq">fused = q · f<sub>LiDAR</sub> &nbsp;+&nbsp; (1−q) · f<sub>camera</sub></div>
+          <div class="flow-note">Continuous weighting — no hard mode switch. As LiDAR degrades, q drops smoothly and the model leans on camera features. q also conditions the output uncertainty.</div>
+        </div>
+
+        <div class="flow-connector"></div>
+
+        <!-- Trajectory head -->
+        <div class="flow-block output">
+          <div class="flow-label green">TRAJECTORY HEAD  ·  C4</div>
+          <div class="flow-chips">
+            <span class="flow-chip grn">(μ, log σ) per future position</span>
+            <span class="flow-chip grn">6 steps × 0.5 s = 3 s horizon</span>
+            <span class="flow-chip grn">NLL training loss · ECE-calibrated</span>
+          </div>
+          <div class="flow-note">Gaussian distribution over future waypoints. Uncertainty (σ) is trained to widen proportionally as q → 0 — a planner receiving a wide σ can respond conservatively rather than trusting a degraded estimate blindly.</div>
+        </div>
+
+        <div class="flow-connector" style="height: 38px;"></div>
+
+        <!-- Inference spectrum -->
+        <div class="flow-block result">
+          <div class="flow-label purple">INFERENCE  ·  CONTINUOUS GRACEFUL DEGRADATION</div>
+          <div class="flow-note" style="margin-bottom: 12px;">One model, trained once on nuScenes — no retraining, no mode switching, no separate models per beam count.</div>
+          <div class="flow-infer-row">
+            <div class="flow-infer-cell hi">
+              <div class="fi-level">Dense LiDAR</div>
+              <div class="fi-q">q ≈ 1.0 · 32 beams</div>
+              <div class="fi-sig">narrow σ · confident</div>
+            </div>
+            <div class="flow-arrow-r">→</div>
+            <div class="flow-infer-cell mid">
+              <div class="fi-level">Sparse LiDAR</div>
+              <div class="fi-q">q ≈ 0.3–0.6 · 2–8 beams</div>
+              <div class="fi-sig">moderate σ · cautious</div>
+            </div>
+            <div class="flow-arrow-r">→</div>
+            <div class="flow-infer-cell lo">
+              <div class="fi-level">Camera Only</div>
+              <div class="fi-q">q ≈ 0.0 · 0 beams</div>
+              <div class="fi-sig">wide σ · very uncertain</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Architecture ──────────────────────────── -->
+  <section id="architecture">
+    <div class="section-header">
+      <span class="tag">SECTION 03</span>
+      <h2>Model Architecture</h2>
+      <span class="desc">Temporal transformer on BEV + crop + box features, with soft modality gating</span>
+    </div>
+    <div class="section-body">
+      <div class="note">
+        <strong>Baseline codebase:</strong> temporal transformer velocity predictor from
+        <a href="https://github.com/srijanpal07/temporal-lidar-camera-bev-fusion">temporal-lidar-camera-bev-fusion</a>.
+        The T_MODEL vs T_kf distinction (BEV steps vs keyframe count) caused an inference crash in the
+        baseline — keep this in mind when modifying the temporal architecture.
+      </div>
+
+      <div class="step-list" style="margin-top: 16px;">
+        <div class="step-item">
+          <span class="step-n green">IN</span>
+          <div>
+            <h4>Inputs per timestep</h4>
+            <ul>
+              <li><strong>BEV stack</strong> — (T × 22 ch, 500, 500) full-scene LiDAR BEV (possibly degraded via C1/C2)</li>
+              <li><strong>Crop stack</strong> — (T × 22 ch, 64, 64) vehicle-centred 16 m × 16 m window, yaw-aligned</li>
+              <li><strong>Box params</strong> — (T, 10) [x, y, z, l, w, h, yaw, dt, vx̂, vŷ] with camera-detector noise</li>
+              <li><strong>Point cloud stats</strong> — (S,) density, range histogram, intensity variance → gating signal</li>
+            </ul>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">ENC</span>
+          <div>
+            <h4>Per-frame encoders</h4>
+            <ul>
+              <li><strong>BEV encoder</strong> — ResNet18 (no pretrained weights) → 256-dim feature</li>
+              <li><strong>Crop encoder</strong> — lightweight 3-stage CNN → 128-dim feature</li>
+              <li><strong>Box MLP</strong> — Linear(10, 64) → 64-dim feature</li>
+              <li>Concatenated: (T, 448) sequence</li>
+            </ul>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">TMP</span>
+          <div>
+            <h4>Temporal aggregation</h4>
+            <p>2-layer, 4-head Transformer encoder with learned positional encoding.
+               Mean-pool over T steps → 256-dim context vector.
+               GRU variant available as a faster baseline.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">GAT</span>
+          <div>
+            <h4>Modality gating (C3)</h4>
+            <p>Quality estimator MLP on point cloud stats → scalar <em>q</em> ∈ [0, 1].
+               Fused feature = <em>q</em> × f<sub>LiDAR</sub> + (1−<em>q</em>) × f<sub>camera</sub>.
+               <em>q</em> also conditions the trajectory head uncertainty.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n green">OUT</span>
+          <div>
+            <h4>Output heads</h4>
+            <ul>
+              <li><strong>VelocityHead</strong> — 2-layer MLP → [vx, vy] (baseline, Month 1)</li>
+              <li><strong>TrajectoryHead</strong> — separate μ and log σ heads → (T_future, 2) each (C4, Month 2)</li>
+              <li>T_future = 6 steps × 0.5 s = 3 s horizon, matching nuScenes forecasting protocol</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Evaluation ────────────────────────────── -->
+  <section id="evaluation">
+    <div class="section-header">
+      <span class="tag">SECTION 04</span>
+      <h2>Evaluation Plan</h2>
+      <span class="desc">Three experiments — degradation curves · calibration sweep · Isaac Sim cross-domain</span>
+    </div>
+    <div class="section-body">
+
+      <h3 style="color: var(--text); font-size: 0.92rem; margin-bottom: 8px;">Primary Metrics</h3>
+      <div class="metric-row">
+        <span class="metric-pill">ADE @ 1s / 2s / 3s</span>
+        <span class="metric-pill">FDE @ 1s / 2s / 3s</span>
+        <span class="metric-pill green">ECE (calibration)</span>
+        <span class="metric-pill green">NLL (proper scoring)</span>
+        <span class="metric-pill purple">Interval coverage @ 90%</span>
+      </div>
+
+      <div class="step-list" style="margin-top: 20px;">
+        <div class="step-item">
+          <span class="step-n">EXP1</span>
+          <div>
+            <h4>Degradation Curves — Figure 1 of the paper</h4>
+            <p>Plot ADE / FDE / ECE vs. LiDAR beam count {32, 16, 8, 4, 2, 0} for:</p>
+            <ul>
+              <li>Baseline — clean-trained model (collapses at low beam counts)</li>
+              <li>+ Stochastic dropout training (C2)</li>
+              <li>+ Soft modality gating + calibrated output (C2 + C3)</li>
+            </ul>
+            <p style="margin-top: 8px;">The gap between curve 1 and curve 3 across all metrics is the paper's main result.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">EXP2</span>
+          <div>
+            <h4>Calibration Sweep — Reliability Diagrams</h4>
+            <p>At each beam level: compute ECE, interval coverage at 50/80/90/95%, NLL, and reliability diagram.
+               Key diagnostic: does predicted uncertainty widen proportionally as beams drop?
+               Over-confidence under degradation (intervals too narrow) is the dangerous failure mode.</p>
+          </div>
+        </div>
+        <div class="step-item">
+          <span class="step-n">EXP3</span>
+          <div>
+            <h4>Cross-Domain Robustness — Isaac Sim Physics-Accurate Degradation</h4>
+            <p>Train on real nuScenes only. Test on Isaac Sim degraded scenes — no Isaac Sim training data.
+               Conditions: clear {32, 16, 8, 4} beams, fog (light/moderate/heavy), rain, dust storm, LiDAR failure.</p>
+            <p style="margin-top: 6px;"><strong>This is NOT sim-to-real.</strong> Call it "cross-domain robustness validation."
+               Question answered: does stochastic dropout training generalize to physics-accurate degradation
+               beyond artificially subsampled beams?</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: var(--text); font-size: 0.92rem; margin: 20px 0 12px;">Ablation Table</h3>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>ADE↓</th><th>FDE↓</th><th>ECE↓</th><th>NLL↓</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Baseline (clean-trained)</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>+ Stochastic dropout (C2)</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>+ Soft gating, geometric (C3)</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>Hard switch (MoME-style routing)</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          <tr><td>+ CLIP gating (exploratory ablation)</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Timeline ───────────────────────────────── -->
+  <section id="timeline">
+    <div class="section-header">
+      <span class="tag">SECTION 05</span>
+      <h2>3-Month Research Timeline</h2>
+      <span class="desc">Target: RA-L submission September 2026</span>
+    </div>
+    <div class="section-body">
+      <div class="month-block">
+        <h3>MONTH 1 — Foundation (July 2026)</h3>
+        <ul>
+          <li><strong>Week 1–2:</strong> Extend velocity head → multi-step trajectory + uncertainty (TrajectoryHead). Establish clean 32-beam baseline ADE/FDE/ECE on nuScenes.</li>
+          <li><strong>Week 3:</strong> Implement beam-reduction pipeline. Plot degradation curves at 32/16/8/4/2/0 beams. <em>This is Figure 1 — it motivates everything else.</em></li>
+          <li><strong>Week 4:</strong> Isaac Sim setup — configure nuScenes-like urban scene, calibrate LiDAR sensor models (weather conditions + beam counts), generate 500–1000 labeled scenarios with paired camera renders.</li>
+        </ul>
+      </div>
+      <div class="month-block">
+        <h3>MONTH 2 — Core Contributions (August 2026)</h3>
+        <ul>
+          <li><strong>Week 5–6:</strong> Stochastic beam dropout training (C2). Re-plot degradation curves vs. Month 1 baseline. Show gap closing.</li>
+          <li><strong>Week 7:</strong> Modality gating + calibrated output (C3). Train quality estimator head on point cloud density stats. Verify ECE improves alongside ADE/FDE.</li>
+          <li><strong>Week 8:</strong> Gating ablation — no gating / hard switch / soft gating / MoME-style. Optional: test CLIP-based gating as one ablation row.</li>
+          <li><strong>Week 9:</strong> Cross-domain robustness evaluation — Isaac Sim inference, no fine-tuning. Plot ADE/FDE + ECE across degradation conditions.</li>
+        </ul>
+      </div>
+      <div class="month-block">
+        <h3>MONTH 3 — Polish + Paper (September 2026)</h3>
+        <ul>
+          <li><strong>Week 10–11:</strong> Full ablation table (all metric columns). Edge cases on Isaac Sim: LiDAR failure, heavy fog, dust storm. Report accuracy AND calibration.</li>
+          <li><strong>Week 12:</strong> Paper writing. Lead with degradation motivation curve (Fig 1). Calibrated uncertainty under degradation as key angle. Cross-domain validation as supporting experiment.</li>
+          <li><strong>Target:</strong> RA-L submission end of September 2026. CVPR 2027 as parallel stretch if VLM ablation shows strong results (deadline ≈ Nov 2026).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Novelty ────────────────────────────────── -->
+  <section id="novelty">
+    <div class="section-header">
+      <span class="tag">SECTION 06</span>
+      <h2>Novelty vs. Prior Work</h2>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead>
+          <tr><th>Claim</th><th>Prior Art</th><th>Our Delta</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Train rich LiDAR, infer weak sensor</td>
+            <td>LEROjD (ECCV 2024)</td>
+            <td class="highlight">Continuous spectrum {32→2→0}, not binary modality switch</td>
+          </tr>
+          <tr>
+            <td>Trajectory forecasting under degradation</td>
+            <td>MTR, Wayformer (clean input); EgoTraj-Bench (ego noise only)</td>
+            <td class="highlight">Structured hardware degradation → downstream ADE/FDE — first to connect both</td>
+          </tr>
+          <tr>
+            <td>Calibrated uncertainty under degradation</td>
+            <td>All prior work reports ADE/FDE only</td>
+            <td class="highlight">ECE + NLL at each beam level: model knows when it is unreliable</td>
+          </tr>
+          <tr>
+            <td>Soft modality gating</td>
+            <td>Cocoon, FDSNet</td>
+            <td>Geometric density-based quality score + calibrated uncertainty propagation</td>
+          </tr>
+          <tr>
+            <td>Discrete MoE gating</td>
+            <td>Grace-BEV (arXiv May 2026), MoME (CVPR 2025)</td>
+            <td>Binary dropout / discrete routing, mAP only, no trajectory, no calibration</td>
+          </tr>
+          <tr>
+            <td>Cross-domain robustness validation</td>
+            <td>RESBev (nuScenes only), Sensor-Fault Forecasting Bench. (2026)</td>
+            <td class="highlight">Physics-accurate Isaac Sim degradation as held-out test domain</td>
+          </tr>
+          <tr>
+            <td>BEV robustness mechanism</td>
+            <td>RESBev (post-hoc latent recovery)</td>
+            <td>Training policy (stochastic dropout) — baked into model, not a plug-in wrapper</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warn" style="margin-top: 16px;">
+        <strong>Grace-BEV</strong> (arXiv:2605.30983, May 2026) is the closest competitor.
+        Three concrete gaps our work fills: (1) continuous beam spectrum vs. binary modality dropout,
+        (2) trajectory ADE/FDE vs. detection mAP, (3) calibrated ECE/NLL under degradation — absent in Grace-BEV entirely.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Related Work ───────────────────────────── -->
+  <section id="related">
+    <div class="section-header">
+      <span class="tag">SECTION 07</span>
+      <h2>Related Work</h2>
+    </div>
+    <div class="section-body">
+
+      <h3 style="color: var(--accent); font-size: 0.82rem; font-family: monospace; letter-spacing: 0.06em; margin-bottom: 10px;">DIRECT COMPETITORS — MUST CITE AND DIFFERENTIATE</h3>
+      <table style="margin-bottom: 20px;">
+        <thead><tr><th>Paper</th><th>Venue</th><th>Our gap vs. them</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2605.30983">Grace-BEV</a></td>
+            <td>arXiv May 2026</td>
+            <td>Binary modality dropout · mAP only · no trajectory · no calibration</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2503.19776">MoME</a></td>
+            <td>CVPR 2025</td>
+            <td>Discrete per-query expert routing · we use soft continuous gating with calibrated output</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2603.09529">RESBev</a></td>
+            <td>arXiv Mar 2026</td>
+            <td>Post-hoc latent recovery · we bake robustness into training policy</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2605.10822">Sensor-Fault Forecasting Bench.</a></td>
+            <td>arXiv May 2026</td>
+            <td>Read before finalising evaluation protocol — closest benchmark to ours</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2304.09801">MetaBEV</a></td>
+            <td>2023</td>
+            <td>Sensor failure for BEV detection/seg · detection focus, not trajectory + calibration</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="color: var(--accent); font-size: 0.82rem; font-family: monospace; letter-spacing: 0.06em; margin-bottom: 10px;">FOUNDATIONS</h3>
+      <table style="margin-bottom: 20px;">
+        <thead><tr><th>Paper</th><th>Venue</th><th>Relevance</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2409.05564">LEROjD</a></td>
+            <td>ECCV 2024</td>
+            <td>LiDAR-train / radar-infer — binary switch, not continuous spectrum</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/html/2407.05679v3">BEVWorld</a></td>
+            <td>2024</td>
+            <td>Multimodal world model in BEV latent space</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/html/2410.12592v1">Cocoon</a></td>
+            <td>2024</td>
+            <td>Uncertainty-aware sensor fusion · geometric disagreement signal</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2510.00405">EgoTraj-Bench</a></td>
+            <td>arXiv Oct 2025</td>
+            <td>Robust trajectory under ego-view noise · ours targets hardware degradation</td>
+          </tr>
+          <tr>
+            <td><a href="https://arxiv.org/abs/2606.00416">4D Radar + LiDAR + Camera</a></td>
+            <td>CVPR 2026 Workshop</td>
+            <td>Physics-based LiDAR degradation benchmarks · compare Isaac Sim pipeline to OPV2V-R/Adver-City-R</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Venues ─────────────────────────────────── -->
+  <section id="venues">
+    <div class="section-header">
+      <span class="tag">SECTION 08</span>
+      <h2>Target Venues</h2>
+      <span class="desc">CVPR/IROS/ECCV 2026 deadlines have passed — realistic upcoming targets</span>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead>
+          <tr><th>Venue</th><th>Deadline</th><th>Fit</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>RA-L (IEEE Robotics &amp; Automation Letters)</td>
+            <td class="highlight">Rolling · Aug–Oct 2026</td>
+            <td class="highlight">Primary</td>
+            <td>Rolling deadline, ~3 month review. Accepted papers presented at ICRA/IROS.</td>
+          </tr>
+          <tr>
+            <td>CoRL 2026</td>
+            <td class="warn-cell">~June–July 2026</td>
+            <td>Strong</td>
+            <td>Check current deadline. Real deployment + calibrated degradation + trajectory fits CoRL.</td>
+          </tr>
+          <tr>
+            <td>CVPR 2027</td>
+            <td>~Nov 2026</td>
+            <td>Stretch</td>
+            <td>Highest visibility. Calibrated robustness + trajectory forecasting fits the perception/planning convergence trend.</td>
+          </tr>
+          <tr>
+            <td>ICRA 2027</td>
+            <td>~Sep 2026</td>
+            <td>Strong</td>
+            <td>Parallel path with RA-L — RA-L accepted papers get ICRA presentation automatically.</td>
+          </tr>
+          <tr>
+            <td>IROS 2027</td>
+            <td>~Mar 2027</td>
+            <td>Good</td>
+            <td>Fallback if RA-L review takes longer than expected.</td>
+          </tr>
+          <tr>
+            <td>CVPR 2026 Workshops (WAD, AUTOPILOT, DriveX, S2S@ICRA)</td>
+            <td class="warn-cell">Passed / check</td>
+            <td>Good</td>
+            <td>Lower bar, good for early feedback and visibility before main venue submission.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Repo Structure ─────────────────────────── -->
+  <section id="structure">
+    <div class="section-header">
+      <span class="tag">SECTION 09</span>
+      <h2>Repository Structure</h2>
+    </div>
+    <div class="section-body">
+      <div class="note">
+        Old <code>src/*.py</code> files are thin re-exports pointing to new locations — existing scripts continue to work unchanged.
+        <span style="color: var(--green);">Green</span> = real migrated code.
+        <span style="color: var(--yellow);">Yellow</span> = placeholder stub (to implement).
+      </div>
+      <div class="file-tree" style="margin-top: 14px;">
+<span class="dir">src/</span>
+  <span class="dir">  data/</span>
+    <span class="new">    dataset.py</span>          <span class="note-inline">— BEVVelocityDataset (migrated)</span>
+    <span class="new">    box_noise.py</span>        <span class="note-inline">— camera-detector noise (migrated)</span>
+    <span class="stub">    beam_degradation.py</span> <span class="note-inline">— C1/C2 beam subsampling (stub)</span>
+    <span class="stub">    trajectory_targets.py</span><span class="note-inline">— C4 GT waypoint extraction (stub)</span>
+    <span class="stub">    isaac_sim.py</span>        <span class="note-inline">— cross-domain eval dataloader (stub)</span>
+    <span class="stub">    transforms.py</span>       <span class="note-inline">— BEV augmentation (stub)</span>
+  <span class="dir">  models/</span>
+    <span class="new">    encoders.py</span>         <span class="note-inline">— BEVEncoder, ResNet18, CropEncoder (migrated)</span>
+    <span class="new">    temporal.py</span>         <span class="note-inline">— TemporalVelocityPredictor (migrated)</span>
+    <span class="new">    heads.py</span>            <span class="note-inline">— VelocityHead (real) + TrajectoryHead (stub, C4)</span>
+    <span class="stub">    gating.py</span>           <span class="note-inline">— ModalityGating (stub, C3)</span>
+  <span class="dir">  training/</span>
+    <span class="new">    losses.py</span>           <span class="note-inline">— velocity MSE, trajectory NLL, combined loss</span>
+    <span class="new">    metrics.py</span>          <span class="note-inline">— ADE, FDE, NLL (training-time)</span>
+    <span class="stub">    calibration.py</span>      <span class="note-inline">— interval coverage, ECE (training-time)</span>
+    <span class="new">    checkpointing.py</span>    <span class="note-inline">— save/load checkpoint</span>
+  <span class="dir">  eval/</span>
+    <span class="stub">    degradation_curves.py</span>  <span class="note-inline">— sweep beam levels, collect metrics (stub)</span>
+    <span class="stub">    forecasting_metrics.py</span> <span class="note-inline">— minADE_k, minFDE_k, MissRate_k (stub)</span>
+    <span class="stub">    calibration_metrics.py</span> <span class="note-inline">— full ECE, reliability diagrams (stub)</span>
+  <span class="dir">  utils/</span>
+    <span class="new">    kalman.py</span>           <span class="note-inline">— KF + RTS smoother (migrated)</span>
+    <span class="new">    geometry.py</span>         <span class="note-inline">— BEV projection, ego-motion compensation</span>
+
+<span class="dir">scripts/</span>
+  <span class="dir">  train/</span>
+    <span class="new">    train.py</span>            <span class="note-inline">— unified entrypoint (task: velocity|trajectory in config)</span>
+  <span class="dir">  eval/</span>
+    <span class="stub">    eval_degradation_curve.py</span>
+    <span class="stub">    eval_calibration.py</span>
+    <span class="stub">    eval_isaac_sim.py</span>
+  <span class="dir">  baselines/</span>
+    <span class="stub">    match_bevformer_instances.py</span>
+    <span class="stub">    infer_with_bevformer_boxes.py</span>
+  <span class="dir">  data/</span>
+    <span class="note-inline">    (existing scripts: prepare_dataset.py, save_bev.py, check_bev.py)</span>
+
+<span class="dir">configs/</span>
+    <span class="new">  train_baseline.yaml</span>
+    <span class="new">  train_dropout.yaml</span>
+    <span class="new">  eval_degradation.yaml</span>
+    <span class="new">  eval_isaac_sim.yaml</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Hardware ───────────────────────────────── -->
+  <section id="hardware">
+    <div class="section-header">
+      <span class="tag">SECTION 10</span>
+      <h2>Hardware &amp; Tools</h2>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>Component</th><th>Spec</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>GPU</td>
+            <td>NVIDIA RTX Pro 5000 Ada · ~32 GB VRAM</td>
+            <td>Model training, ResNet18 + Transformer, CLIP LoRA fine-tuning</td>
+          </tr>
+          <tr>
+            <td>Simulator</td>
+            <td>NVIDIA Isaac Sim 5.1.0 (conda env_isaacsim)</td>
+            <td>Physics-accurate LiDAR degradation (fog, rain, dust, beam config)</td>
+          </tr>
+          <tr>
+            <td>Dataset</td>
+            <td>nuScenes — 1000 scenes, 32-beam Velodyne HDL-32E, 6 cameras, 5 radars</td>
+            <td>Training + nuScenes-R/C validation</td>
+          </tr>
+          <tr>
+            <td>Baseline codebase</td>
+            <td><code>src/</code> — temporal transformer velocity predictor</td>
+            <td>Foundation for C1–C4 extensions</td>
+          </tr>
+          <tr>
+            <td>nuScenes LiDAR</td>
+            <td>HDL-32E · 32 beams · ~40 K points/scan</td>
+            <td>Beam reduction: keep every (32/N)-th elevation ring to simulate N-beam sensor</td>
+          </tr>
+          <tr>
+            <td>nuScenes radar</td>
+            <td>Classical 3D (range, azimuth, Doppler) · 5 units</td>
+            <td>4D radar requires Isaac Sim or View-of-Delft — not in nuScenes natively</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="purple-note" style="margin-top: 16px;">
+        <strong>T_MODEL vs T_kf:</strong> T_MODEL = number of BEV steps fed to the encoder.
+        T_kf = number of keyframes (box params + crops). When <code>use_subframes=True</code>,
+        T_MODEL = 2 × T_kf. A mismatch caused an inference crash in the baseline codebase —
+        the dataset interleaves far+near BEV pairs but repeats crops/box params to match.
+        Always verify these align when modifying the temporal architecture.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  Robust BEV Perception under Sensor Degradation &nbsp;·&nbsp;
+  nuScenes + Isaac Sim 5.1.0 + PyTorch &nbsp;·&nbsp;
+  Target: RA-L Aug–Oct 2026 &nbsp;·&nbsp;
+  Last updated June 2026
+</footer>
+
+</body>
+</html>

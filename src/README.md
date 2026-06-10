@@ -1,21 +1,47 @@
 # src/
 
-Python package containing the dataset class and model used by `scripts/train.py` and `scripts/infer.py`.
+Core Python package for the robust BEV perception project.
+
+## Layout
 
 ```
 src/
-├── __init__.py
-├── dataset.py   # BEVVelocityDataset — temporal sliding-window PyTorch dataset
-├── model.py     # TemporalVelocityPredictor — BEV encoder + temporal model velocity predictor
-├── kalman.py    # Kalman filter + RTS smoother for velocity estimation from noisy positions
-├── box_noise.py # Realistic camera-only 3D detector noise injection
-└── utils.py     # Shared helper utilities
+├── data/
+│   ├── dataset.py           # BEVVelocityDataset  ← use this
+│   ├── box_noise.py         # camera-detector noise injection
+│   ├── beam_degradation.py  # C1/C2 LiDAR beam dropout  [stub]
+│   ├── trajectory_targets.py# C4 future waypoint extraction [stub]
+│   ├── isaac_sim.py         # cross-domain eval dataset  [stub]
+│   └── transforms.py        # BEV augmentation           [stub]
+├── models/
+│   ├── encoders.py          # BEVEncoder, ResNet18BEVEncoder, CropEncoder
+│   ├── temporal.py          # TemporalVelocityPredictor  ← use this
+│   ├── heads.py             # VelocityHead (working), TrajectoryHead [stub]
+│   └── gating.py            # ModalityGating             [stub]
+├── training/
+│   ├── losses.py            # velocity_mse_loss, trajectory_nll_loss
+│   ├── metrics.py           # ade, fde, mean_nll
+│   ├── calibration.py       # interval_coverage, ece_1d
+│   └── checkpointing.py     # save_checkpoint, load_checkpoint
+├── eval/
+│   ├── degradation_curves.py# beam-level sweep           [stub]
+│   ├── forecasting_metrics.py # minADE_k, minFDE_k       [stub]
+│   └── calibration_metrics.py # ECE, reliability diagrams[stub]
+├── utils/
+│   ├── kalman.py            # Kalman + RTS smoother
+│   └── geometry.py          # BEV projection, ego-motion
+│
+# Legacy re-exports — old import paths still work; prefer src.models.* and src.data.*
+├── model.py      → re-exports from src.models.*
+├── dataset.py    → re-exports from src.data.dataset
+├── kalman.py     → re-exports from src.utils.kalman
+└── box_noise.py  → re-exports from src.data.box_noise
 ```
 
 Run all scripts from the **project root** so that `src` resolves correctly:
 
 ```bash
-python scripts/train.py   # not: cd scripts && python train.py
+python scripts/train/train.py --config configs/train_baseline.yaml
 ```
 
 ---

@@ -1,11 +1,35 @@
-torch==2.7.0
-torchvision==0.22.0
-numpy==1.26.4
-Pillow==11.3.0
-pyquaternion==0.9.9
-nuscenes-devkit==1.2.0
-pyyaml>=6.0
-matplotlib>=3.7
+# PyTorch — install separately to get the correct CUDA wheel:
+#   pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu126
+# (cu124 wheel index only goes up to torch 2.6.0; cu126 has 2.7.0; driver supports CUDA 12.8)
+
+# Core numerics
+numpy==1.26.4          # pinned: nuscenes-devkit uses legacy numpy API (np.bool etc.), breaks on 2.x
 scipy>=1.10
-rerun-sdk==0.15.1
+Pillow==11.3.0
+
+# nuScenes
+nuscenes-devkit==1.2.0
+pyquaternion==0.9.9
+
+# Config / IO
+pyyaml>=6.0
 tqdm>=4.65
+
+# Training utilities
+einops                 # used by transformer variants in the temporal encoder
+tensorboard            # training curves — runs locally, integrates with VS Code
+
+# Visualization + results
+matplotlib>=3.7
+seaborn                # reliability diagrams (calibration figures)
+pandas                 # results tables / ablation CSVs
+rerun-sdk==0.15.1      # point cloud + BEV visualization
+
+# Calibration / eval
+scikit-learn           # ECE binning, calibration curve utilities
+
+# Dev
+ipykernel              # Jupyter notebooks in VS Code
+
+# CLIP ablation (install separately when starting C5 work):
+#   pip install transformers peft

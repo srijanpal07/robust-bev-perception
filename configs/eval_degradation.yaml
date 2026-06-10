@@ -1,0 +1,24 @@
+data:
+  meta_path: data/meta.json
+  data_dir:  data/bevs
+  split:     val
+
+model:
+  T:              3
+  box_dim:        10
+  hidden_size:    256
+  dropout:        0.0   # no dropout at eval time
+  bev_encoder:    resnet18
+  crop_encoder:   lightweight
+  bev_channels:   22
+  crop_channels:  22
+  temporal_model: transformer
+  nhead:          4
+  num_layers:     2
+  dim_feedforward: 512
+
+eval:
+  batch_size:   64
+  num_workers:  4
+  beam_levels: [32, 16, 8, 4, 2, 0]
+  horizons_s:  [1.0, 2.0, 3.0]   # ADE/FDE horizons in seconds
