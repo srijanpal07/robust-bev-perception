@@ -114,6 +114,123 @@ class CropEncoder(nn.Module):
         return self.fc(self.net(x).flatten(1))   # (B, 128)
 
 
+class ResNet18BEVEncoderWithFeatures(nn.Module):
+    """ResNet18 BEV encoder that returns BOTH the feature map AND the pooled embedding.
+
+    Phase 2 replacement for ResNet18BEVEncoder — required for RoI Align-based
+    per-agent feature extraction.  The feature map (B, 512, H_feat, W_feat) is
+    passed to RoIAgentEncoder; the pooled embedding (B, 256) can serve as optional
+    global scene context.
+
+    Spatial scale for a 500×500 input through ResNet18:
+        500 → 250 (stem, stride 2) → 125 (layer1, no stride) → 63 (layer2, stride 2)
+            → 32 (layer3, stride 2) → 16 (layer4, stride 2)
+    spatial_scale = 16 / 500 = 0.032  (feature pixels per BEV pixel)
+    """
+
+    SPATIAL_SCALE = 16.0 / 500.0   # used by RoIAgentEncoder
+
+    def __init__(self, in_ch: int = 22):
+        super().__init__()
+        import torchvision.models as tvm
+        resnet = tvm.resnet18(weights=None)
+        if in_ch != 3:
+            resnet.conv1 = nn.Conv2d(in_ch, 64, kernel_size=7, stride=2,
+                                     padding=3, bias=False)
+        self.backbone  = nn.Sequential(*list(resnet.children())[:-2])   # → (B, 512, H, W)
+        self.avgpool   = resnet.avgpool
+        self.fc        = nn.Linear(512, 256)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        feat_map = self.backbone(x)                      # (B, 512, H_feat, W_feat)
+        pooled   = self.avgpool(feat_map).flatten(1)     # (B, 512)
+        return self.fc(pooled), feat_map                 # (B, 256), (B, 512, H, W)
+
+
+class RoIAgentEncoder(nn.Module):
+    """Phase 2 replacement for CropEncoder.
+
+    Extracts per-agent local features from the shared BEV feature map via
+    torchvision RoI Align — one BEV encoder pass regardless of N agents.
+
+    Why this replaces CropEncoder:
+    - CropEncoder required N separate 64×64 forward passes (one per agent per scene).
+    - RoIAgentEncoder samples from the feature map already computed by the BEV encoder.
+    - O(1) BEV encoder cost regardless of N agents.
+    - Per-agent spatial features are still preserved via the RoI window.
+    - q_i (per-agent quality score) is computed from point density within the RoI region.
+
+    Interface with ResNet18BEVEncoderWithFeatures:
+        _, feat_map = bev_encoder(bev_stack)         # (B, 512, H_feat, W_feat)
+        agent_feats = roi_encoder(feat_map, boxes)   # (B, N, out_dim)
+
+    Agent boxes must be in BEV pixel coordinates [x1, y1, x2, y2], yaw-aligned
+    by rotating the crop window before sampling (or via deformable sampling).
+    torchvision.ops.roi_align handles fractional pixel coordinates and bilinear
+    interpolation; spatial_scale converts BEV pixel coords to feature map coords.
+    """
+
+    def __init__(self, in_channels: int = 512, output_size: int = 7, out_dim: int = 256):
+        super().__init__()
+        self.output_size = output_size
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(in_channels * output_size * output_size, out_dim),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, feat_map: torch.Tensor, agent_boxes: list,
+                spatial_scale: float = ResNet18BEVEncoderWithFeatures.SPATIAL_SCALE,
+                ) -> torch.Tensor:
+        """
+        feat_map:     (B, 512, H_feat, W_feat) from ResNet18BEVEncoderWithFeatures
+        agent_boxes:  list of length B, each entry (N_i, 4) — [x1,y1,x2,y2]
+                      in BEV pixel coordinates (yaw-aligned window recommended)
+        spatial_scale: feat_map pixel / BEV pixel  (default: 16/500 = 0.032)
+        returns:      (B, N_max, out_dim) — zero-padded to N_max agents
+
+        Implementation note:
+            torchvision.ops.roi_align expects boxes as (K, 5) with
+            [batch_idx, x1, y1, x2, y2].  Pad to the maximum agent count
+            across the batch and return a padded tensor.
+        """
+        from torchvision.ops import roi_align
+
+        rois = []
+        agent_counts = []
+        for b_idx, boxes in enumerate(agent_boxes):
+            if boxes.shape[0] == 0:
+                agent_counts.append(0)
+                continue
+            batch_col = torch.full((boxes.shape[0], 1), b_idx,
+                                   dtype=boxes.dtype, device=boxes.device)
+            rois.append(torch.cat([batch_col, boxes], dim=1))   # (N_i, 5)
+            agent_counts.append(boxes.shape[0])
+
+        if not rois:
+            B = feat_map.shape[0]
+            return feat_map.new_zeros(B, 0, self.head[-2].out_features if hasattr(
+                self.head[-2], 'out_features') else 256)
+
+        all_rois  = torch.cat(rois, dim=0)                       # (sum_N, 5)
+        pooled    = roi_align(feat_map, all_rois,
+                              output_size=self.output_size,
+                              spatial_scale=spatial_scale,
+                              aligned=True)                      # (sum_N, 512, K, K)
+        feats     = self.head(pooled)                            # (sum_N, out_dim)
+
+        # Re-assemble into (B, N_max, out_dim) with zero padding
+        N_max  = max(agent_counts) if agent_counts else 0
+        B      = feat_map.shape[0]
+        out    = feats.new_zeros(B, N_max, feats.shape[-1])
+        ptr    = 0
+        for b_idx, n in enumerate(agent_counts):
+            if n > 0:
+                out[b_idx, :n] = feats[ptr:ptr + n]
+                ptr += n
+        return out                                               # (B, N_max, out_dim)
+
+
 class EfficientNetCropEncoder(nn.Module):
     """EfficientNet-B0 crop encoder: (in_ch, 64, 64) → (128,).
 

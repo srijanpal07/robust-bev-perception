@@ -2,7 +2,7 @@
 
 ## Thesis Statement
 
-A single model trained on high-quality LiDAR + camera + radar can produce accurate, **calibrated** trajectory predictions across a continuous sensor degradation spectrum at inference — by training with stochastic LiDAR beam dropout and uncertainty-aware modality gating — closing the training-inference gap that causes silent perception failure when sensors degrade in adverse weather or hardware wear, and validated via cross-domain robustness evaluation on physics-accurate Isaac Sim degradation.
+A single model trained on high-quality LiDAR + camera data produces accurate, **calibrated** joint trajectory predictions for all dynamic agents in the scene — across a continuous sensor degradation spectrum — by combining stochastic LiDAR beam dropout training, per-agent uncertainty-aware modality gating, and degradation-aware agent-agent interaction modeling. The system closes the training-inference gap that causes silent perception failure when sensors degrade in adverse weather or hardware wear, validated via cross-domain robustness evaluation on physics-accurate Isaac Sim degradation.
 
 ---
 
@@ -16,40 +16,46 @@ A single model trained on high-quality LiDAR + camera + radar can produce accura
 │  TRAINING                                                        │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  Real nuScenes: 32-beam LiDAR + 6 cameras + box detects  │    │
+│  │  All dynamic agents: vehicles, pedestrians, cyclists      │    │
 │  │  + Stochastic beam dropout (C2): {32, 16, 8, 4, 2, 0}    │    │
 │  │    sampled per batch — 0 beams = camera-only training    │    │
-│  └────────────────────────┬─────────────────────────────────┘    │
-│                           │                                      │
-│                           ▼                                      │
-│  BEV Encoder (C1+C2) ── learns P(BEV | any sensor quality)      │
-│  ResNet18(500×500 BEV) · CropEncoder(64×64) · Box MLP           │
-│  concatenated: 256 + 128 + 64 = 448-dim per frame               │
-│                           │                                      │
-│                           ▼                                      │
+│  └───────────────────────┬──────────────────────────────────┘    │
+│                          │  N agents per scene simultaneously    │
+│                          ▼                                       │
+│  Per-Agent Encoding (C1+C2)                                      │
+│  ResNet18 BEV + Box MLP → (N, 256) embeddings                   │
+│  Phase 1: CropEncoder (64×64 crop per agent)                    │
+│  Phase 2: RoI Align on shared BEV feat map (O(1) encoder cost)  │
+│  q_i = per-agent quality score (local point density in crop)    │
+│                          │                                       │
+│                          ▼                                       │
 │  Temporal Transformer ── 2-layer, 4-head, T=3 frames            │
-│  mean-pool over history → 256-dim context vector                │
-│                           │                                      │
-│                           ▼                                      │
-│  Modality Gating (C3) ── pc stats → quality score q ∈ [0, 1]   │
-│  fused = q · f_LiDAR  +  (1−q) · f_camera                      │
-│  no hard switch — q transitions continuously as LiDAR degrades  │
-│                           │                                      │
-│                           ▼                                      │
-│  Trajectory Head (C4) ── (μ, log σ) × 6 steps = 3s horizon     │
-│  NLL training loss · uncertainty widens as q → 0 · ECE-calib.  │
+│  → (N, 256) temporally-aggregated per-agent embeddings          │
+│                          │                                       │
+│                          ▼                                       │
+│  Modality Gating (C3) ── per-agent: q_i gates LiDAR vs camera  │
+│  fused_i = q_i · f_LiDAR_i  +  (1−q_i) · f_camera_i           │
+│                          │                                       │
+│                          ▼                                       │
+│  Agent-Agent Interaction ── HiVT local context encoder [cited]  │
+│  attn_{ij} = softmax(Q_i·K_j − λ·(1−q_j))  ← novel extension  │
+│  degraded agents (low q_j) contribute less context to neighbours│
+│  → (N, 256) interaction-refined embeddings                      │
+│                          │                                       │
+│                          ▼                                       │
+│  Trajectory Head (C4) ── (μ_i, log σ_i) × 6 steps per agent   │
+│  NLL training · σ_i widens as q_i → 0 · ECE-calibrated         │
 │                                                                  │
 ├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  INFERENCE  ─  one model, continuous graceful degradation        │
+│  INFERENCE  ─  N agents jointly, continuous graceful degradation │
 │                                                                  │
 │  32-beam        ──→     8-beam        ──→   camera-only          │
-│  q ≈ 1.0                q ≈ 0.4–0.6         q ≈ 0.0             │
-│  narrow σ               moderate σ           wide σ             │
-│  (confident)            (cautious)           (very uncertain)   │
+│  q_i ≈ 1.0              q_i ≈ 0.4–0.6       q_i ≈ 0.0           │
+│  narrow σ_i             moderate σ_i         wide σ_i           │
+│  high interaction trust  reduced trust        very uncertain     │
 │                                                                  │
-│  RESULT: one model trained once on nuScenes — no retraining,    │
-│  no mode switching, graceful degradation across the full         │
-│  beam-count spectrum validated on Isaac Sim physics sim          │
+│  RESULT: one model, all agents jointly, graceful degradation     │
+│  across full beam-count spectrum — no mode switching             │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,10 +94,32 @@ The training-inference gap is the specific, unsolved problem this work targets: 
 - Degrades to camera-only when LiDAR score → 0
 - **Calibrated uncertainty output:** the prediction head outputs a distribution over future waypoints (Gaussian or GMM), not just a point estimate. Uncertainty should widen correctly as sensor quality drops — this is the "calibrated graceful degradation" claim. Measured via Expected Calibration Error (ECE) and NLL alongside ADE/FDE.
 
-### C4: Velocity → Trajectory Extension
-- Extend output head from (vx, vy) to future waypoints [(x, y) × T_future] with uncertainty
-- Benchmark directly on nuScenes motion forecasting task
-- Comparable to MTR, Wayformer, HiVT — but with noisy/degraded sensor robustness and calibrated confidence they lack
+### C4: Multi-Agent Trajectory Forecasting with Degradation-Aware Interaction
+
+**Scene coverage (phased):**
+- Phase 1: `vehicle.car` only — establish degradation baseline, validate C1–C3
+- Phase 2: All dynamic categories (`vehicle.*`, `human.pedestrian.*`, `vehicle.bicycle`) with relaxed filters:
+  - Remove speed threshold (stationary agents that may become dynamic are valid targets)
+  - Reduce min-track-length from 40 frames to ~12 (= T_context + T_future + buffer)
+  - Keep front-camera visibility for now; revisit with multi-camera detection
+
+**Per-agent encoding:**
+- Each of N agents in the scene is encoded independently: BEV crop + box params → 256-dim embedding
+- Per-agent quality score `q_i` estimated from local point density in that agent's BEV crop — not a global scene score. Occluded or sparsely-covered agents have lower q_i even under clean global LiDAR.
+
+**Agent-agent interaction — adapted from HiVT [Zhou et al., CVPR 2022]:**
+- HiVT's local context encoder performs cross-agent attention over all N agents
+- Standard attention: `attn_{ij} = softmax(Q_i · K_j)`
+- **Novel extension — degradation-aware attention:**
+  ```
+  attn_{ij} = softmax(Q_i · K_j − λ · (1 − q_j))
+  ```
+  Agent j's quality score q_j down-weights how much j's features are used as context by agent i. A poorly-covered agent (low q_j) contributes less to its neighbours' predictions. No existing interaction model accounts for per-agent sensor quality.
+- We cite HiVT for the interaction architecture; the degradation-aware attention weighting is novel.
+
+**Calibrated joint output:**
+- `(μ_i, log σ_i) × T_future` per agent — same probabilistic head as C3
+- σ_i widens when (a) agent i's own q_i is low, and (b) the agents it attended to have low q_j — uncertainty propagates through the interaction graph
 
 ---
 
@@ -105,37 +133,42 @@ This is an interesting idea to test once the baseline (C1–C4) is working and s
 
 ---
 
-## Short-Term Goals (Month 1 — Foundation)
+## Implementation Goals (No Fixed Timeline)
 
-- [ ] **Week 1–2:** Extend existing model from velocity prediction to multi-step trajectory (waypoint head). Run on nuScenes motion forecasting split. Establish baseline numbers (ADE/FDE at 1s/2s/3s with clean 32-beam LiDAR).
-- [ ] **Week 3:** Implement beam-reduction pipeline. Plot ADE/FDE vs. beam count (32→16→8→4→2→0). This degradation curve motivates everything — it is Figure 1 of the paper.
-- [ ] **Week 4:** Isaac Sim setup — configure a nuScenes-like urban scene, calibrate 32-beam and degraded LiDAR sensor models (fog, rain, dust, 4-beam hardware), generate 500–1000 labeled scenarios with ground-truth degradation conditions and paired camera renders.
+The work is organised into three phases. No hard deadlines — take the time needed to get the results right. See [docs/implementation_plan.md](docs/implementation_plan.md) for the detailed build order and code status.
+
+### Phase 1 — Single-Agent Baseline (C1–C3)
+- [ ] Online BEV renderer from raw LiDAR (replaces pre-saved BEV files)
+- [ ] Beam dropout pipeline — ring-index filter on raw point cloud, {32, 16, 8, 4, 2, 0}
+- [ ] nuScenes scene-level dataset using nuScenes-devkit natively
+- [ ] Per-agent quality score `q_i` from local point density
+- [ ] Modality gating wired into training loop
+- [ ] Trajectory head (μ, log σ) + NLL loss + ECE metric
+- [ ] **Key result:** degradation curve — ADE/FDE + ECE vs beam count {32→0}. This is Figure 1 of the paper.
+
+### Phase 2 — Multi-Agent + Interaction (C4)
+- [ ] Expand dataset to all dynamic categories; relax filters
+- [ ] Wire RoI Align encoder (replaces CropEncoder for scale)
+- [ ] Wire AgentInteractionModule into training loop
+- [ ] Multi-agent collate_fn with variable N + padding mask
+- [ ] **Key result:** interaction ablation — with vs without degradation-aware attention
+
+### Phase 3 — Cross-Domain Validation (Isaac Sim)
+- [ ] Configure Isaac Sim sensor params (HDL-32E: 32 beams, 10 Hz, beam angles)
+- [ ] Generate physics-accurate degraded scenes (fog, rain, 4-beam, LiDAR failure)
+- [ ] Run Phase 2 model zero-shot on Isaac Sim outputs — no fine-tuning
+- [ ] **Key result:** cross-domain ADE/FDE + ECE — does robustness transfer beyond beam subsampling?
+- [ ] Early task (can do before Phase 2): lock HDL-32E sensor parameters in a config file
 
 ---
 
-## Medium-Term Goals (Month 2 — Core Contributions)
-
-- [ ] **Week 5–6:** Stochastic beam dropout training (C2). Randomly sample LiDAR beam count per batch {32, 16, 8, 4, 0}. Retrain and re-plot degradation curve vs. Month 1 baseline. Show the gap closes.
-- [ ] **Week 7:** Modality gating + calibrated output (C3). Train lightweight degradation-predictor head on point cloud density statistics. Add probabilistic output head (Gaussian over future waypoints). Measure ECE and NLL alongside ADE/FDE at each beam level — verify uncertainty widens as beams drop.
-- [ ] **Week 8:** Gating ablation. Compare: no gating / hard switch / soft gating (ours) / MoME-style discrete routing. If time allows: test CLIP-based gating as an additional ablation row (see exploratory section above).
-- [ ] **Week 9:** Cross-domain robustness evaluation (Isaac Sim). Take the model trained exclusively on real nuScenes data (with stochastic dropout). Run inference on Isaac Sim physics-accurate degraded point clouds — no Isaac Sim data at training time. Plot ADE/FDE + uncertainty calibration on Isaac Sim across degradation conditions (fog, rain, 4-beam, LiDAR failure). This is not "sim-to-real" — it is cross-domain validation. The question: does stochastic dropout training generalize to physically simulated degradation, not just artificially subsampled beams?
-
----
-
-## Long-Term Goals (Month 3 — Polish + Paper)
-
-- [ ] **Week 10–11:** Full ablation table — C2 only, C2+C3, C2+C3+CLIP gating (if results justify). Metrics: ADE/FDE and ECE at each beam level. Compare to: (1) no-dropout baseline, (2) hard-switch, (3) MoME-style routing, (4) MetaBEV/RESBev if reproducible.
-- [ ] **Week 11:** Edge case experiments on Isaac Sim — complete LiDAR failure, heavy fog, dust storm. Report both ADE/FDE (accuracy) and ECE (calibration) — a model that is inaccurate but knows it is still useful for safe planning.
-- [ ] **Week 12:** Paper writing. Lead with: (1) degradation motivation curve as Figure 1, (2) calibrated uncertainty under degradation as the key novel angle, (3) cross-domain Isaac Sim validation (not "sim-to-real" — "physics-accurate robustness evaluation").
-
----
-
-## Future Extensions (Beyond 3 Months)
+## Future Extensions
 
 - **4D Radar integration:** nuScenes has classical 3D radar (5 units). Extend to simulated 4D imaging radar in Isaac Sim as a weather-robust fallback. 4D radar provides native Doppler velocity and survives fog/rain where LiDAR fails.
 - **Full world model:** Replace the BEV encoder with a generative world model that hallucinates missing modalities (e.g., predict what LiDAR would see given camera + motion history). BEVWorld is the closest reference.
 - **Occupancy flow prediction:** Extend from per-agent trajectory to dense BEV occupancy forecasting. Comparable to Cam4DOcc benchmark.
 - **Real adverse weather validation:** Collect or license data with annotated adverse weather (K-Radar, View-of-Delft datasets).
+- **Learned interaction graph under degradation:** Currently the interaction graph topology is fixed (fully-connected within radius). Future work: learn which agent-agent edges to prune based on joint sensor coverage — two agents both poorly covered should have their interaction edge down-weighted more aggressively than the simple `q_j` penalty.
 
 ---
 
@@ -161,10 +194,11 @@ This is an interesting idea to test once the baseline (C1–C4) is working and s
 | Claim | Prior art | Our delta |
 |---|---|---|
 | Train rich LiDAR, infer weak sensor | LEROjD (radar) | Continuous quality spectrum, not binary switch |
-| Trajectory forecasting under degradation | MTR, Wayformer — clean input only; EgoTraj-Bench — ego noise only | Structured hardware degradation (beam loss) → downstream ADE/FDE, first to connect both |
-| Calibrated uncertainty under degradation | Prior work reports ADE/FDE only | ECE + NLL at each degradation level: model knows when it is unreliable |
-| Soft modality gating | Cocoon, FDSNet | Geometric density-based quality score with soft continuous weighting (not discrete MoE) |
-| Discrete MoE gating | MoME (CVPR 2025) | MoME routes per-query; we gate per-modality with calibrated uncertainty propagation |
+| Multi-agent trajectory forecasting under degradation | MTR, Wayformer, HiVT — clean input only; EgoTraj-Bench — ego noise only | First work connecting structured hardware degradation (beam loss) → multi-agent ADE/FDE |
+| Calibrated uncertainty under degradation | All prior forecasting work reports ADE/FDE only | ECE + NLL at each degradation level: model knows when it is unreliable |
+| Per-agent quality estimation | Global scene-level quality only (Cocoon, FDSNet) | Per-agent q_i from local crop density — occluded agents get lower q even under clean global LiDAR |
+| Agent-agent interaction | HiVT, MTR, Wayformer — all assume equally reliable agent features | Degradation-aware attention: `attn_{ij} ∝ exp(Q_i·K_j − λ·(1−q_j))` — first interaction model to account for per-agent sensor quality |
+| Soft modality gating | Cocoon, FDSNet | Per-agent geometric quality score with soft continuous weighting (not discrete MoE) |
 | Cross-domain robustness evaluation | RESBev (nuScenes only), Sensor-Fault Forecasting Benchmark (2026) | Physics-accurate Isaac Sim degradation (fog, rain, 4-beam hardware) as held-out test domain |
 | BEV robustness mechanism | RESBev (post-hoc latent recovery) | Training policy (stochastic dropout) — baked into the model, not a plug-in wrapper |
 
@@ -248,7 +282,7 @@ The gap between curve 1 and curve 3 across all metrics is the paper's main resul
 - **GPU:** NVIDIA RTX Pro 5000 Ada (~32GB VRAM) — can run large BEV models
 - **Simulator:** NVIDIA Isaac Sim (Omniverse) — physics-accurate LiDAR, camera, radar simulation
 - **Dataset:** nuScenes (32-beam LiDAR, 6 cameras, 5 radars, 1000 scenes)
-- **Baseline codebase:** `src/` — temporal transformer velocity predictor
+- **Codebase:** full rewrite from scratch — nuScenes-devkit native, online LiDAR loading, scene-level dataset. See [docs/implementation_plan.md](docs/implementation_plan.md).
 
 ---
 
@@ -257,4 +291,4 @@ The gap between curve 1 and curve 3 across all metrics is the paper's main resul
 - nuScenes uses Velodyne HDL-32E (32 beams, ~40K points/scan)
 - Beam reduction: keep every (32/N)-th elevation ring to simulate N-beam LiDAR
 - nuScenes radar is classical 3D (range, azimuth, Doppler) — 4D radar requires Isaac Sim or View-of-Delft dataset
-- T_MODEL vs T_kf distinction in baseline code: BEV steps vs keyframe count — prior inference crash from mismatch, keep this in mind when modifying the temporal architecture
+- T_MODEL vs T_kf: BEV steps vs keyframe count — was a source of crashes in the old pipeline. The new nuScenes-native dataset will handle this explicitly via keyframe timestamps.

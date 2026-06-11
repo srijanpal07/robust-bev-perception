@@ -10,13 +10,15 @@ This is not a solved problem. Waymo's Gen 6 (2026) added mechanical sensor clean
 
 ## The Approach
 
-We train a unified perception framework on real nuScenes sensor data (dense LiDAR, camera, radar) while injecting a continuous spectrum of synthetic degradation at training time via **stochastic LiDAR beam dropout** — randomly sampling beam counts {32, 16, 8, 4, 0} per batch. The model learns a shared BEV latent representation that encodes scene geometry and agent motion regardless of current sensor quality.
+We train a unified perception framework on real nuScenes sensor data while injecting a continuous spectrum of synthetic degradation at training time via **stochastic LiDAR beam dropout** — randomly sampling beam counts {32, 16, 8, 4, 0} per batch. The model encodes all dynamic agents in the scene (vehicles, pedestrians, cyclists) simultaneously and learns a shared BEV representation that encodes geometry and agent motion regardless of current sensor quality.
 
-At inference, a lightweight **modality gating network** estimates per-modality quality from point cloud statistics and continuously re-weights LiDAR vs. camera BEV features — smoothly degrading from full-stack perception down to camera-only without hard switching.
+At inference, a lightweight **per-agent modality gating network** estimates a quality score `q_i` for each agent from its local point cloud density, and continuously re-weights LiDAR vs. camera features per agent — smoothly degrading from full-stack perception down to camera-only without hard switching.
 
-Critically, the trajectory prediction head outputs a **distribution** over future waypoints (not just a point estimate). Uncertainty should widen as sensor quality drops — a model that is inaccurate but knows it is still useful for safe planning. We measure this with ECE (Expected Calibration Error) and NLL alongside ADE/FDE.
+Agents are predicted jointly via a **degradation-aware interaction module** adapted from HiVT [Zhou et al., CVPR 2022]. Standard cross-agent attention is extended to down-weight poorly-covered agents as context sources: `attn_{ij} ∝ exp(Q_i·K_j − λ·(1−q_j))`. Degraded agents contribute less to their neighbours' predictions — no existing interaction model accounts for per-agent sensor quality.
 
-**Cross-domain robustness validation:** The model is trained exclusively on real nuScenes data. Physics-accurate degraded point clouds are generated in NVIDIA Isaac Sim (fog, rain, 4-beam hardware, LiDAR failure). We evaluate on Isaac Sim outputs without any Isaac Sim training data — measuring whether stochastic dropout training generalizes to physically accurate degradation beyond artificially subsampled beams.
+The trajectory head outputs a **distribution** `(μ_i, σ_i)` over future waypoints per agent. Uncertainty widens as `q_i → 0` — a model that is inaccurate but knows it is still useful for safe planning. We measure calibration with ECE and NLL alongside ADE/FDE.
+
+**Cross-domain robustness validation:** The model is trained exclusively on real nuScenes data. Physics-accurate degraded point clouds are generated in NVIDIA Isaac Sim (fog, rain, 4-beam hardware, LiDAR failure) and used as a held-out test domain — no Isaac Sim data at training time.
 
 ## System Overview
 
@@ -28,48 +30,52 @@ Critically, the trajectory prediction head outputs a **distribution** over futur
 │  TRAINING                                                        │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  Real nuScenes: 32-beam LiDAR + 6 cameras + box detects  │    │
+│  │  All dynamic agents: vehicles, pedestrians, cyclists      │    │
 │  │  + Stochastic beam dropout: {32, 16, 8, 4, 2, 0} / batch │    │
 │  │    0 beams per batch = camera-only training              │    │
-│  └────────────────────────┬─────────────────────────────────┘    │
-│                           │                                      │
-│                           ▼                                      │
-│  BEV Encoder ── learns P(BEV | any sensor quality)              │
-│  ResNet18(500×500 BEV) · CropEncoder(64×64) · Box MLP           │
-│  concatenated: 256 + 128 + 64 = 448-dim per frame               │
-│                           │                                      │
-│                           ▼                                      │
+│  └───────────────────────┬──────────────────────────────────┘    │
+│                          │  N agents per scene simultaneously    │
+│                          ▼                                       │
+│  Per-Agent Encoding ── ResNet18 BEV + RoI Align · Box MLP       │
+│  → (N, 256) embeddings  +  q_i per agent (local point density)  │
+│  (Phase 1: CropEncoder; Phase 2: RoI Align on shared feat map)  │
+│                          │                                       │
+│                          ▼                                       │
 │  Temporal Transformer ── 2-layer, 4-head, T=3 frames            │
-│  mean-pool over history → 256-dim context vector                │
-│                           │                                      │
-│                           ▼                                      │
-│  Modality Gating ── pc stats → quality score q ∈ [0, 1]        │
-│  fused = q · f_LiDAR  +  (1−q) · f_camera                      │
-│  (no hard switch — q transitions continuously)                  │
-│                           │                                      │
-│                           ▼                                      │
-│  Trajectory Head ── (μ, log σ) × 6 steps × 0.5s = 3s horizon   │
-│  uncertainty σ widens as q → 0  ·  ECE-calibrated               │
+│  → (N, 256) temporally-aggregated per-agent embeddings          │
+│                          │                                       │
+│                          ▼                                       │
+│  Modality Gating ── per agent: q_i gates LiDAR vs camera        │
+│  fused_i = q_i · f_LiDAR_i  +  (1−q_i) · f_camera_i           │
+│                          │                                       │
+│                          ▼                                       │
+│  Agent-Agent Interaction ── HiVT context encoder [cited]        │
+│  attn_{ij} = softmax(Q_i·K_j − λ·(1−q_j))   ← novel           │
+│  degraded agents contribute less context to neighbours           │
+│  → (N, 256) interaction-refined embeddings                      │
+│                          │                                       │
+│                          ▼                                       │
+│  Trajectory Head ── (μ_i, log σ_i) × 6 steps = 3s per agent   │
+│  σ_i widens as q_i → 0  ·  ECE-calibrated                      │
 │                                                                  │
 ├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  INFERENCE  ─  one model, continuous graceful degradation        │
+│  INFERENCE  ─  N agents jointly, continuous graceful degradation │
 │                                                                  │
 │  32-beam        ──→     8-beam        ──→   camera-only          │
-│  q ≈ 1.0                q ≈ 0.4–0.6         q ≈ 0.0             │
-│  narrow σ               moderate σ           wide σ             │
-│  (confident)            (cautious)           (very uncertain)   │
-│                                                                  │
+│  q_i ≈ 1.0              q_i ≈ 0.4–0.6       q_i ≈ 0.0           │
+│  narrow σ_i             moderate σ_i         wide σ_i           │
+│  high interaction trust  reduced trust        very uncertain     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Baseline
+## Starting Point
 
-This project builds on a temporal transformer-based velocity predictor trained on nuScenes LiDAR BEV maps and camera-derived bounding boxes ([baseline repo](https://github.com/srijanpal07/temporal-lidar-camera-bev-fusion)):
+This project is a clean rewrite inspired by a prior temporal transformer velocity predictor ([baseline repo](https://github.com/srijanpal07/temporal-lidar-camera-bev-fusion)). The dataset is the same (nuScenes) and some ideas overlap, but the full pipeline is being rewritten from scratch for best results:
 
-- BEV encoder (ResNet18) + crop encoder + 2-layer 4-head transformer
-- Camera-detector noise injection at runtime (distance-dependent, non-Gaussian)
-- Kalman filter for kinematic velocity estimation from noisy detections
-- Residual velocity prediction: model predicts `(GT_vel - noisy_vhat)`
+- **No pre-saved BEV files** — BEV rendered online from raw LiDAR at training time so beam dropout is applied before voxelization
+- **Scene-level dataset** — all agents in a scene returned together (not one agent per sample)
+- **Probabilistic trajectory head** — (μ, σ) per waypoint, not point-estimate velocity
+- See [docs/implementation_plan.md](docs/implementation_plan.md) for the full build order
 
 ## Implementation Status
 
@@ -81,7 +87,12 @@ This project builds on a temporal transformer-based velocity predictor trained o
 | LiDAR beam dropout pipeline (C1/C2) | **Stub** | `src/data/beam_degradation.py` |
 | Stochastic dropout training (C2) | **Not wired** — awaits C1 | `configs/train_dropout.yaml` |
 | Uncertainty-aware modality gating (C3) | **Stub** | `src/models/gating.py` |
-| Trajectory head + NLL loss (C4) | **Stub** | `src/models/heads.py` |
+| Trajectory head + NLL loss (C4, per-agent) | **Stub** | `src/models/heads.py` |
+| RoI Align per-agent encoder (Phase 2) | **Stub** | `src/models/encoders.py` |
+| Agent-agent interaction module (HiVT-adapted, C4) | **Stub** | `src/models/interaction.py` |
+| Degradation-aware attention (novel λ penalty) | **Stub** | `src/models/interaction.py` |
+| Multi-agent modality gating (B, N, feat_dim) | **Stub** | `src/models/gating.py` |
+| Multi-category agent dataset (Phase 2) | **Not started** | filter_dataset.py expansion |
 | Cross-domain Isaac Sim evaluation | **Stub** | `src/data/isaac_sim.py` |
 | CLIP-based gating ablation | **Not started** | — |
 
@@ -90,49 +101,49 @@ This project builds on a temporal transformer-based velocity predictor trained o
 ```
 robust-bev-perception/
 ├── src/
-│   ├── data/               # Dataset, degradation, augmentation
-│   │   ├── dataset.py      # BEVVelocityDataset  ← canonical
-│   │   ├── beam_degradation.py  # C1/C2 beam dropout (stub)
-│   │   ├── trajectory_targets.py
-│   │   ├── isaac_sim.py    # cross-domain eval dataset (stub)
-│   │   ├── box_noise.py    # camera-detector noise
-│   │   └── transforms.py
-│   ├── models/             # Model components
-│   │   ├── encoders.py     # BEVEncoder, ResNet18BEVEncoder, CropEncoder
-│   │   ├── temporal.py     # TemporalVelocityPredictor  ← canonical
-│   │   ├── heads.py        # VelocityHead (working), TrajectoryHead (stub)
-│   │   └── gating.py       # ModalityGating (stub)
-│   ├── training/           # Losses, metrics, calibration, checkpointing
-│   ├── eval/               # Degradation curves, forecasting, calibration metrics
-│   ├── utils/              # Kalman smoother, geometry helpers
-│   │   ├── kalman.py
-│   │   └── geometry.py
-│   │
-│   # Legacy re-exports (kept for backward compat — import from src.models.* instead)
-│   ├── model.py  ·  dataset.py  ·  kalman.py  ·  box_noise.py
+│   ├── data/
+│   │   ├── nuscenes_dataset.py  # ← Phase 1/2 scene-level dataset (to build)
+│   │   ├── bev_renderer.py      # online BEV voxelizer from raw LiDAR (to build)
+│   │   ├── quality_score.py     # per-agent q_i from local point density (to build)
+│   │   ├── beam_degradation.py  # C1/C2 ring-index beam dropout (stub — rewrite)
+│   │   ├── isaac_sim.py         # cross-domain eval dataset (stub)
+│   │   ├── box_noise.py         # camera-detector noise (keep)
+│   │   └── transforms.py        # BEV augmentation (stub)
+│   ├── models/
+│   │   ├── encoders.py     # ResNet18BEVEncoderWithFeatures, RoIAgentEncoder (P2 ready);
+│   │   │                   # CropEncoder (P1); BEVEncoder, ResNet18BEVEncoder (legacy)
+│   │   ├── gating.py       # MultiAgentModalityGating (P2 stub); ModalityGating (P1 stub)
+│   │   ├── interaction.py  # AgentInteractionModule + DegradationAwareAttention (P2 stub)
+│   │   ├── heads.py        # TrajectoryHead (μ, log σ) — stub, rewrite
+│   │   └── temporal.py     # TemporalVelocityPredictor (legacy velocity model)
+│   ├── training/           # losses.py · metrics.py · calibration.py · checkpointing.py
+│   ├── eval/               # degradation_curves · forecasting_metrics · calibration_metrics
+│   └── utils/              # kalman.py · geometry.py
 │
 ├── scripts/
-│   ├── train/train.py      # ← canonical training entrypoint (YAML-driven)
-│   ├── eval/               # eval_degradation_curve, eval_calibration, eval_isaac_sim
-│   ├── baselines/          # BEVFormer matching / inference (migrating)
+│   ├── train/
+│   │   ├── train_p1.py     # ← Phase 1 training entrypoint (to build)
+│   │   └── train_p2.py     # ← Phase 2 training entrypoint (to build)
+│   ├── eval/               # eval_degradation_curve · eval_calibration · eval_isaac_sim
 │   │
-│   # Legacy scripts (original baseline — still functional)
-│   ├── train.py  ·  infer.py  ·  visualize.py
-│   └── save_bev.py  ·  filter_dataset.py  ·  prepare_dataset.py  ·  …
+│   # Legacy (previous project — reference only)
+│   └── train.py · infer.py · save_bev.py · filter_dataset.py · prepare_dataset.py
 │
 ├── configs/                # YAML experiment configs
-├── docs/                   # overview.html — open in browser for full research overview
-├── data/                   # Symlink or mount point for nuScenes
-└── outputs/                # Training outputs (not tracked in git)
+├── docs/
+│   ├── overview.html          # visual research overview (open in browser)
+│   └── implementation_plan.md # build order, phase definitions, code status
+├── data/                   # symlink or mount point for nuScenes (~400GB)
+└── outputs/                # training outputs (not tracked in git)
 ```
 
 ## Setup
 
 ```bash
-pip install -r requirements.txt
+bash setup.sh   # creates conda env 'bevrobust', installs torch 2.7.0+cu126, registers Jupyter kernel
 ```
 
-See `configs/train.yaml` for dataset paths and training hyperparameters.
+See [docs/implementation_plan.md](docs/implementation_plan.md) for build order and what to implement next.
 
 ## Hardware
 

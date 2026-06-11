@@ -1,0 +1,31 @@
+data:
+  dataroot: /mnt/datasets/nuscenes
+  version: v1.0-trainval   # 'v1.0-trainval' or 'v1.0-mini'
+  t_future: 6               # 6 steps × 0.5 s = 3 s prediction horizon
+
+training:
+  seed: 42
+  batch_size: 16
+  num_workers: 4
+  epochs: 50
+  lr: 2.0e-4
+  weight_decay: 1.0e-3
+  grad_clip: 1.0
+  accum_steps: 2            # effective batch = batch_size × accum_steps = 32
+  nll_weight: 1.0
+  ade_weight: 0.5
+  eval_every: 5             # degradation curve eval every N epochs
+  eval_n_samples: 2000      # max val samples used for per-beam degradation eval
+
+model:
+  bev_channels: 22
+  box_dim: 7
+  box_proj_dim: 32
+  lidar_feat_dim: 256
+  t_future: 6
+  dropout: 0.1
+
+output:
+  ckpt_dir:  outputs/phase1/checkpoints
+  log_csv:   outputs/phase1/train_log.csv
+  cache_dir: outputs/phase1/index_cache

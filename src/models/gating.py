@@ -2,6 +2,42 @@ import torch
 import torch.nn as nn
 
 
+class MultiAgentModalityGating(nn.Module):
+    """Phase 2: per-agent modality gating for (B, N, feat_dim) batches.
+
+    Same gating logic as ModalityGating but processes N agents simultaneously.
+    Input features are (B, N, feat_dim); q_scores are (B, N, 1).
+
+    Used with ResNet18BEVEncoderWithFeatures + RoIAgentEncoder.
+    """
+
+    def __init__(self, lidar_feat_dim: int = 256, camera_feat_dim: int = 256,
+                 stats_dim: int = 16):
+        super().__init__()
+        self.quality_estimator = nn.Sequential(
+            nn.Linear(stats_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, lidar_feat: torch.Tensor, camera_feat: torch.Tensor,
+                pc_stats: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            lidar_feat:  (B, N, lidar_feat_dim)
+            camera_feat: (B, N, camera_feat_dim)
+            pc_stats:    (B, N, stats_dim) — per-agent point cloud statistics
+
+        Returns:
+            fused: (B, N, lidar_feat_dim)
+            q:     (B, N, 1) — per-agent quality score in [0, 1]
+        """
+        q = self.quality_estimator(pc_stats)          # (B, N, 1)
+        fused = q * lidar_feat + (1.0 - q) * camera_feat
+        return fused, q
+
+
 class ModalityGating(nn.Module):
     """Soft per-modality quality gating from point cloud statistics.
 

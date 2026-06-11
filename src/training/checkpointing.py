@@ -1,8 +1,8 @@
 """Checkpoint save / load utilities."""
 
-import torch
-import os
 from pathlib import Path
+
+import torch
 
 
 def save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
@@ -27,6 +27,6 @@ def load_checkpoint(model: torch.nn.Module, path: str | Path,
     return {k: v for k, v in ckpt.items() if k not in ('model', 'optimizer')}
 
 
-def best_checkpoint_path(run_dir: str | Path, metric: str = 'val_ade') -> Path:
-    """Return path to the checkpoint with the lowest value of `metric`."""
-    raise NotImplementedError
+def best_checkpoint_path(run_dir: str | Path, metric: str = 'val_nll') -> Path:
+    """Return path to best.pt in run_dir (saved by train_p1.py when val metric improves)."""
+    return Path(run_dir) / 'best.pt'

@@ -633,12 +633,16 @@
         </div>
 
         <div class="contrib-card">
-          <div class="contrib-label">C4 · DOWNSTREAM TASK</div>
-          <h3>Trajectory Forecasting under Degradation</h3>
-          <p>Extends velocity head to multi-step waypoint prediction with uncertainty:
-             (μ, log σ) per future position. Benchmarked on nuScenes motion forecasting
-             (minADE, minFDE, MissRate). First work to connect continuous hardware degradation
-             directly to calibrated trajectory output — the metric planners actually consume.</p>
+          <div class="contrib-label">C4 · MULTI-AGENT FORECASTING</div>
+          <h3>Trajectory Forecasting with Degradation-Aware Interaction</h3>
+          <p>All dynamic agents (vehicles, pedestrians, cyclists) predicted jointly.
+             Interaction module adapted from
+             <a href="https://arxiv.org/abs/2206.10924" style="color:var(--accent)">HiVT [Zhou et al., CVPR 2022]</a>
+             — cited, not claimed novel. <strong>Novel extension:</strong>
+             degradation-aware attention weights agents by their per-agent quality score
+             <em>q<sub>j</sub></em>: poorly-covered agents contribute less context to their
+             neighbours. No existing interaction model accounts for per-agent sensor quality.
+             Output: (μ<sub>i</sub>, log σ<sub>i</sub>) per agent × 6 steps = 3 s horizon.</p>
         </div>
 
         <div class="contrib-card ablation">
@@ -672,24 +676,28 @@
             <span class="flow-chip acc">6 cameras · box detections</span>
           </div>
           <div class="flow-chips" style="margin-top: 6px;">
+            <span class="flow-chip acc">All dynamic agents: vehicles · pedestrians · cyclists</span>
+          </div>
+          <div class="flow-chips" style="margin-top: 6px;">
             <span class="flow-chip grn">+ Stochastic beam dropout (C2)</span>
             <span class="flow-chip grn">sample {32, 16, 8, 4, 2, 0} per batch</span>
             <span class="flow-chip grn">0 beams = camera-only batches</span>
           </div>
-          <div class="flow-note">Trains the encoder on the full degradation spectrum using only real nuScenes data — synthetic dropout synthesizes what the model needs to see without collecting real sparse-LiDAR scenes.</div>
+          <div class="flow-note">N agents per scene encoded simultaneously. Synthetic beam dropout synthesizes the full degradation spectrum without collecting real sparse-LiDAR scenes.</div>
         </div>
 
         <div class="flow-connector"></div>
 
         <!-- BEV Encoder -->
         <div class="flow-block">
-          <div class="flow-label blue">BEV ENCODER  ·  C1 + C2</div>
+          <div class="flow-label blue">PER-AGENT ENCODING  ·  C1 + C2</div>
           <div class="flow-chips">
-            <span class="flow-chip">ResNet18 on 500×500 BEV</span>
-            <span class="flow-chip">CropEncoder on 64×64</span>
+            <span class="flow-chip">ResNet18BEVEncoderWithFeatures — shared, one pass</span>
+            <span class="flow-chip acc">Phase 1: CropEncoder on 64×64 agent crop</span>
+            <span class="flow-chip" style="border-color:var(--yellow);color:var(--yellow);">Phase 2: RoI Align on shared feat map ← O(1) cost</span>
             <span class="flow-chip">Box MLP — 10 → 64-dim</span>
           </div>
-          <div class="flow-note">Concatenated features: 256 + 128 + 64 = 448-dim per frame.<br>Learns <em>P(scene representation | any sensor quality level)</em>.</div>
+          <div class="flow-note">Phase 1 uses a separate CropEncoder pass per agent. Phase 2 replaces this with <code>torchvision.ops.roi_align</code> on the shared ResNet18 feature map — one BEV encoder pass regardless of N agents. Also produces <strong>q<sub>i</sub></strong> — per-agent quality score from local point density in that agent's BEV region. Occluded agents get lower q<sub>i</sub> even under clean global LiDAR.</div>
         </div>
 
         <div class="flow-connector"></div>
@@ -702,58 +710,71 @@
             <span class="flow-chip">T = 3 frames history</span>
             <span class="flow-chip">learned positional encoding</span>
           </div>
-          <div class="flow-note">Mean-pool over T steps → 256-dim context vector. GRU variant available as a faster ablation baseline.</div>
+          <div class="flow-note">Applied per-agent independently over T history frames → (N, 256) temporally-aggregated embeddings. GRU variant available as faster baseline.</div>
         </div>
 
         <div class="flow-connector"></div>
 
         <!-- Gating -->
         <div class="flow-block gating">
-          <div class="flow-label amber">MODALITY GATING  ·  C3</div>
+          <div class="flow-label amber">MODALITY GATING  ·  C3  ·  per agent</div>
           <div class="flow-chips">
-            <span class="flow-chip amb">pc stats → quality score q ∈ [0, 1]</span>
+            <span class="flow-chip amb">q<sub>i</sub> gates LiDAR vs. camera per agent</span>
             <span class="flow-chip">density · range histogram · intensity variance</span>
           </div>
-          <div class="flow-eq">fused = q · f<sub>LiDAR</sub> &nbsp;+&nbsp; (1−q) · f<sub>camera</sub></div>
-          <div class="flow-note">Continuous weighting — no hard mode switch. As LiDAR degrades, q drops smoothly and the model leans on camera features. q also conditions the output uncertainty.</div>
+          <div class="flow-eq">fused<sub>i</sub> = q<sub>i</sub> · f<sup>LiDAR</sup><sub>i</sub> &nbsp;+&nbsp; (1−q<sub>i</sub>) · f<sup>camera</sup><sub>i</sub></div>
+          <div class="flow-note">Per-agent, continuous — each agent is gated independently based on its own local coverage. No hard switch.</div>
+        </div>
+
+        <div class="flow-connector"></div>
+
+        <!-- Interaction -->
+        <div class="flow-block" style="border-color: #2a3a5a;">
+          <div class="flow-label blue">AGENT-AGENT INTERACTION  ·  adapted from HiVT [CVPR 2022]</div>
+          <div class="flow-chips">
+            <span class="flow-chip acc">cross-agent attention over all N agents</span>
+            <span class="flow-chip" style="border-color: var(--yellow); color: var(--yellow);">degradation-aware weighting ← novel</span>
+          </div>
+          <div class="flow-eq">attn<sub>ij</sub> = softmax(Q<sub>i</sub>·K<sub>j</sub> &minus; λ·(1&minus;q<sub>j</sub>))</div>
+          <div class="flow-note">Agent j's quality score q<sub>j</sub> down-weights how much j contributes as context to agent i's prediction. A poorly-covered agent propagates its uncertainty through the interaction graph. HiVT architecture is cited; the q<sub>j</sub>-weighted attention is novel.</div>
         </div>
 
         <div class="flow-connector"></div>
 
         <!-- Trajectory head -->
         <div class="flow-block output">
-          <div class="flow-label green">TRAJECTORY HEAD  ·  C4</div>
+          <div class="flow-label green">TRAJECTORY HEAD  ·  C4  ·  per agent</div>
           <div class="flow-chips">
-            <span class="flow-chip grn">(μ, log σ) per future position</span>
+            <span class="flow-chip grn">(μ<sub>i</sub>, log σ<sub>i</sub>) per future position</span>
             <span class="flow-chip grn">6 steps × 0.5 s = 3 s horizon</span>
-            <span class="flow-chip grn">NLL training loss · ECE-calibrated</span>
+            <span class="flow-chip grn">NLL training · ECE-calibrated</span>
           </div>
-          <div class="flow-note">Gaussian distribution over future waypoints. Uncertainty (σ) is trained to widen proportionally as q → 0 — a planner receiving a wide σ can respond conservatively rather than trusting a degraded estimate blindly.</div>
+          <div class="flow-note">σ<sub>i</sub> widens when (a) agent i's own q<sub>i</sub> is low, and (b) the agents it attended to had low q<sub>j</sub> — uncertainty propagates through the interaction graph, not just from the agent's own sensor quality.</div>
         </div>
 
         <div class="flow-connector" style="height: 38px;"></div>
 
         <!-- Inference spectrum -->
         <div class="flow-block result">
-          <div class="flow-label purple">INFERENCE  ·  CONTINUOUS GRACEFUL DEGRADATION</div>
+          <div class="flow-label purple">INFERENCE  ·  N AGENTS JOINTLY  ·  CONTINUOUS GRACEFUL DEGRADATION</div>
           <div class="flow-note" style="margin-bottom: 12px;">One model, trained once on nuScenes — no retraining, no mode switching, no separate models per beam count.</div>
           <div class="flow-infer-row">
             <div class="flow-infer-cell hi">
               <div class="fi-level">Dense LiDAR</div>
-              <div class="fi-q">q ≈ 1.0 · 32 beams</div>
-              <div class="fi-sig">narrow σ · confident</div>
+              <div class="fi-q">q<sub>i</sub> ≈ 1.0 · 32 beams</div>
+              <div class="fi-sig">narrow σ<sub>i</sub> · high interaction trust</div>
             </div>
             <div class="flow-arrow-r">→</div>
             <div class="flow-infer-cell mid">
               <div class="fi-level">Sparse LiDAR</div>
-              <div class="fi-q">q ≈ 0.3–0.6 · 2–8 beams</div>
-              <div class="fi-sig">moderate σ · cautious</div>
+              <div class="fi-q">q<sub>i</sub> ≈ 0.3–0.6 · 2–8 beams</div>
+              <div class="fi-sig">moderate σ<sub>i</sub> · reduced trust</div>
             </div>
             <div class="flow-arrow-r">→</div>
             <div class="flow-infer-cell lo">
               <div class="fi-level">Camera Only</div>
-              <div class="fi-q">q ≈ 0.0 · 0 beams</div>
-              <div class="fi-sig">wide σ · very uncertain</div>
+              <div class="fi-q">q<sub>i</sub> ≈ 0.0 · 0 beams</div>
+              <div class="fi-sig">wide σ<sub>i</sub> · very uncertain</div>
             </div>
           </div>
         </div>
@@ -783,10 +804,11 @@
           <div>
             <h4>Inputs per timestep</h4>
             <ul>
-              <li><strong>BEV stack</strong> — (T × 22 ch, 500, 500) full-scene LiDAR BEV (possibly degraded via C1/C2)</li>
-              <li><strong>Crop stack</strong> — (T × 22 ch, 64, 64) vehicle-centred 16 m × 16 m window, yaw-aligned</li>
+              <li><strong>Raw LiDAR</strong> — loaded at training time; beam dropout applied before voxelization (not pre-saved)</li>
+              <li><strong>BEV stack</strong> — (T × 22 ch, 500, 500) rendered online from degraded point cloud</li>
+              <li><strong>Agent boxes</strong> — (N, 4) [x1,y1,x2,y2] BEV pixel coords for RoI Align (Phase 2)</li>
               <li><strong>Box params</strong> — (T, 10) [x, y, z, l, w, h, yaw, dt, vx̂, vŷ] with camera-detector noise</li>
-              <li><strong>Point cloud stats</strong> — (S,) density, range histogram, intensity variance → gating signal</li>
+              <li><strong>q_i</strong> — per-agent point density in BEV crop region → quality score in [0,1]</li>
             </ul>
           </div>
         </div>
@@ -795,10 +817,10 @@
           <div>
             <h4>Per-frame encoders</h4>
             <ul>
-              <li><strong>BEV encoder</strong> — ResNet18 (no pretrained weights) → 256-dim feature</li>
-              <li><strong>Crop encoder</strong> — lightweight 3-stage CNN → 128-dim feature</li>
+              <li><strong>BEV encoder</strong> — ResNet18BEVEncoderWithFeatures → (B,256) + (B,512,16,16) feat map</li>
+              <li><strong>Phase 1</strong> — CropEncoder: 64×64 crop → 128-dim per agent</li>
+              <li><strong>Phase 2</strong> — RoIAgentEncoder: roi_align on shared feat map → (B,N,256) per agent</li>
               <li><strong>Box MLP</strong> — Linear(10, 64) → 64-dim feature</li>
-              <li>Concatenated: (T, 448) sequence</li>
             </ul>
           </div>
         </div>
@@ -825,9 +847,9 @@
           <div>
             <h4>Output heads</h4>
             <ul>
-              <li><strong>VelocityHead</strong> — 2-layer MLP → [vx, vy] (baseline, Month 1)</li>
-              <li><strong>TrajectoryHead</strong> — separate μ and log σ heads → (T_future, 2) each (C4, Month 2)</li>
+              <li><strong>TrajectoryHead</strong> — separate μ and log σ heads → (T_future, 2) each per agent</li>
               <li>T_future = 6 steps × 0.5 s = 3 s horizon, matching nuScenes forecasting protocol</li>
+              <li>NLL loss during training; ECE + ADE/FDE at evaluation</li>
             </ul>
           </div>
         </div>
@@ -959,19 +981,29 @@
             <td class="highlight">Continuous spectrum {32→2→0}, not binary modality switch</td>
           </tr>
           <tr>
-            <td>Trajectory forecasting under degradation</td>
-            <td>MTR, Wayformer (clean input); EgoTraj-Bench (ego noise only)</td>
-            <td class="highlight">Structured hardware degradation → downstream ADE/FDE — first to connect both</td>
+            <td>Multi-agent trajectory forecasting under degradation</td>
+            <td>MTR, Wayformer, HiVT (clean input); EgoTraj-Bench (ego noise only)</td>
+            <td class="highlight">First work connecting structured hardware degradation → multi-agent ADE/FDE jointly</td>
           </tr>
           <tr>
             <td>Calibrated uncertainty under degradation</td>
-            <td>All prior work reports ADE/FDE only</td>
+            <td>All prior forecasting work reports ADE/FDE only</td>
             <td class="highlight">ECE + NLL at each beam level: model knows when it is unreliable</td>
+          </tr>
+          <tr>
+            <td>Per-agent sensor quality estimation</td>
+            <td>Global scene-level quality only (Cocoon, FDSNet)</td>
+            <td class="highlight">q<sub>i</sub> from local crop density — occluded agents get lower q even under clean global LiDAR</td>
+          </tr>
+          <tr>
+            <td>Agent-agent interaction</td>
+            <td>HiVT, MTR, Wayformer — all assume equally reliable agent features</td>
+            <td class="highlight">Degradation-aware attn: attn<sub>ij</sub> ∝ exp(Q<sub>i</sub>·K<sub>j</sub> − λ·(1−q<sub>j</sub>)) — first to account for per-agent sensor quality in interaction</td>
           </tr>
           <tr>
             <td>Soft modality gating</td>
             <td>Cocoon, FDSNet</td>
-            <td>Geometric density-based quality score + calibrated uncertainty propagation</td>
+            <td>Per-agent geometric quality score; soft continuous weighting (not discrete MoE)</td>
           </tr>
           <tr>
             <td>Discrete MoE gating</td>
@@ -1135,55 +1167,58 @@
     </div>
     <div class="section-body">
       <div class="note">
-        Old <code>src/*.py</code> files are thin re-exports pointing to new locations — existing scripts continue to work unchanged.
-        <span style="color: var(--green);">Green</span> = real migrated code.
-        <span style="color: var(--yellow);">Yellow</span> = placeholder stub (to implement).
+        Full rewrite from scratch — nuScenes-devkit native, online LiDAR loading, scene-level dataset.
+        <span style="color: var(--green);">Green</span> = implemented (stub or real).
+        <span style="color: var(--yellow);">Yellow</span> = to build next.
+        Grey = legacy from previous project (reference only).
+        See <code>docs/implementation_plan.md</code> for detailed build order.
       </div>
       <div class="file-tree" style="margin-top: 14px;">
 <span class="dir">src/</span>
   <span class="dir">  data/</span>
-    <span class="new">    dataset.py</span>          <span class="note-inline">— BEVVelocityDataset (migrated)</span>
-    <span class="new">    box_noise.py</span>        <span class="note-inline">— camera-detector noise (migrated)</span>
-    <span class="stub">    beam_degradation.py</span> <span class="note-inline">— C1/C2 beam subsampling (stub)</span>
-    <span class="stub">    trajectory_targets.py</span><span class="note-inline">— C4 GT waypoint extraction (stub)</span>
+    <span class="stub">    nuscenes_dataset.py</span> <span class="note-inline">— scene-level dataset, nuScenes-devkit native (to build)</span>
+    <span class="stub">    bev_renderer.py</span>     <span class="note-inline">— online BEV voxelizer from raw LiDAR (to build)</span>
+    <span class="stub">    quality_score.py</span>    <span class="note-inline">— per-agent q_i from local point density (to build)</span>
+    <span class="stub">    beam_degradation.py</span> <span class="note-inline">— C1/C2 ring-index beam dropout (rewrite stub)</span>
+    <span class="new">    box_noise.py</span>        <span class="note-inline">— camera-detector noise (keep)</span>
     <span class="stub">    isaac_sim.py</span>        <span class="note-inline">— cross-domain eval dataloader (stub)</span>
     <span class="stub">    transforms.py</span>       <span class="note-inline">— BEV augmentation (stub)</span>
   <span class="dir">  models/</span>
-    <span class="new">    encoders.py</span>         <span class="note-inline">— BEVEncoder, ResNet18, CropEncoder (migrated)</span>
-    <span class="new">    temporal.py</span>         <span class="note-inline">— TemporalVelocityPredictor (migrated)</span>
-    <span class="new">    heads.py</span>            <span class="note-inline">— VelocityHead (real) + TrajectoryHead (stub, C4)</span>
-    <span class="stub">    gating.py</span>           <span class="note-inline">— ModalityGating (stub, C3)</span>
+    <span class="new">    encoders.py</span>         <span class="note-inline">— ResNet18BEVEncoderWithFeatures · RoIAgentEncoder (P2 ready) · CropEncoder (P1)</span>
+    <span class="new">    gating.py</span>           <span class="note-inline">— MultiAgentModalityGating (P2 stub) · ModalityGating (P1 stub)</span>
+    <span class="new">    interaction.py</span>      <span class="note-inline">— AgentInteractionModule · DegradationAwareAttention (P2 stub)</span>
+    <span class="stub">    heads.py</span>            <span class="note-inline">— TrajectoryHead (μ, log σ) — rewrite stub</span>
+    <span class="note-inline">    temporal.py</span>         <span class="note-inline">— TemporalVelocityPredictor (legacy velocity model)</span>
   <span class="dir">  training/</span>
-    <span class="new">    losses.py</span>           <span class="note-inline">— velocity MSE, trajectory NLL, combined loss</span>
-    <span class="new">    metrics.py</span>          <span class="note-inline">— ADE, FDE, NLL (training-time)</span>
-    <span class="stub">    calibration.py</span>      <span class="note-inline">— interval coverage, ECE (training-time)</span>
+    <span class="stub">    losses.py</span>           <span class="note-inline">— NLL loss + ADE supervision (rewrite)</span>
+    <span class="stub">    metrics.py</span>          <span class="note-inline">— ADE, FDE, ECE (rewrite)</span>
+    <span class="stub">    calibration.py</span>      <span class="note-inline">— ECE, reliability diagrams</span>
     <span class="new">    checkpointing.py</span>    <span class="note-inline">— save/load checkpoint</span>
   <span class="dir">  eval/</span>
-    <span class="stub">    degradation_curves.py</span>  <span class="note-inline">— sweep beam levels, collect metrics (stub)</span>
-    <span class="stub">    forecasting_metrics.py</span> <span class="note-inline">— minADE_k, minFDE_k, MissRate_k (stub)</span>
-    <span class="stub">    calibration_metrics.py</span> <span class="note-inline">— full ECE, reliability diagrams (stub)</span>
+    <span class="stub">    degradation_curves.py</span>  <span class="note-inline">— sweep beam levels, collect metrics</span>
+    <span class="stub">    calibration_metrics.py</span> <span class="note-inline">— full ECE + reliability diagrams</span>
   <span class="dir">  utils/</span>
-    <span class="new">    kalman.py</span>           <span class="note-inline">— KF + RTS smoother (migrated)</span>
+    <span class="new">    kalman.py</span>           <span class="note-inline">— KF + RTS smoother (keep)</span>
     <span class="new">    geometry.py</span>         <span class="note-inline">— BEV projection, ego-motion compensation</span>
 
 <span class="dir">scripts/</span>
   <span class="dir">  train/</span>
-    <span class="new">    train.py</span>            <span class="note-inline">— unified entrypoint (task: velocity|trajectory in config)</span>
+    <span class="stub">    train_p1.py</span>         <span class="note-inline">— Phase 1 training entrypoint (to build)</span>
+    <span class="stub">    train_p2.py</span>         <span class="note-inline">— Phase 2 training entrypoint (to build)</span>
   <span class="dir">  eval/</span>
     <span class="stub">    eval_degradation_curve.py</span>
     <span class="stub">    eval_calibration.py</span>
     <span class="stub">    eval_isaac_sim.py</span>
-  <span class="dir">  baselines/</span>
-    <span class="stub">    match_bevformer_instances.py</span>
-    <span class="stub">    infer_with_bevformer_boxes.py</span>
-  <span class="dir">  data/</span>
-    <span class="note-inline">    (existing scripts: prepare_dataset.py, save_bev.py, check_bev.py)</span>
+  <span class="note-inline">  (legacy: train.py · infer.py · save_bev.py · filter_dataset.py — previous project, reference only)</span>
+
+<span class="dir">docs/</span>
+    <span class="new">  overview.html</span>           <span class="note-inline">— visual research overview (this file)</span>
+    <span class="new">  implementation_plan.md</span>  <span class="note-inline">— build order, phase definitions, code status</span>
 
 <span class="dir">configs/</span>
-    <span class="new">  train_baseline.yaml</span>
+    <span class="stub">  train_p1.yaml</span>
+    <span class="stub">  train_p2.yaml</span>
     <span class="new">  train_dropout.yaml</span>
-    <span class="new">  eval_degradation.yaml</span>
-    <span class="new">  eval_isaac_sim.yaml</span>
       </div>
     </div>
   </section>
