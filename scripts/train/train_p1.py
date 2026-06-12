@@ -291,8 +291,12 @@ def train(run_cfg: dict, resume: str | None = None):
                     mu, log_sigma, batch['future_waypoints'], nll_w, ade_w,
                 ) / accum_steps
 
+            loss_val = loss.item() * accum_steps
+            if not torch.isfinite(loss).item():
+                optimizer.zero_grad()
+                continue
             scaler.scale(loss).backward()
-            epoch_loss += loss.item() * accum_steps
+            epoch_loss += loss_val
 
             if (step + 1) % accum_steps == 0:
                 if grad_clip > 0:
@@ -301,7 +305,7 @@ def train(run_cfg: dict, resume: str | None = None):
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                pbar.set_postfix(loss=f'{loss.item()*accum_steps:.4f}')
+                pbar.set_postfix(loss=f'{loss_val:.4f}')
 
         train_loss = epoch_loss / len(train_loader)
         scheduler.step()

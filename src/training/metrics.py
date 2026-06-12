@@ -36,5 +36,8 @@ def fde(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def mean_nll(mu: torch.Tensor, log_sigma: torch.Tensor,
              target: torch.Tensor) -> torch.Tensor:
     """Mean Gaussian NLL for monitoring calibration quality during training."""
-    var = torch.exp(2 * log_sigma).clamp(min=1e-6)
+    mu        = mu.float()
+    log_sigma = log_sigma.float().clamp(-1.0, 4.0)
+    target    = target.float()
+    var = torch.exp(2 * log_sigma)
     return (log_sigma + 0.5 * (target - mu) ** 2 / var).mean()

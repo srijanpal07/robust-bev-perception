@@ -41,7 +41,7 @@ def run_degradation_sweep(model: torch.nn.Module,
     """Evaluate model at each beam level and return a list of DegradationResult.
 
     Args:
-        model:           trained model (TemporalVelocityPredictor or trajectory variant)
+        model:           trained Phase1Model
         dataset_factory: callable(n_beams) → Dataset — builds the degraded eval set
         beam_levels:     beam counts to sweep
         device:          torch device string

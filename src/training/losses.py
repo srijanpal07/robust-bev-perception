@@ -21,7 +21,12 @@ def trajectory_nll_loss(mu: torch.Tensor, log_sigma: torch.Tensor,
     Returns:
         scalar NLL loss, averaged over batch and time.
     """
-    var = torch.exp(2 * log_sigma).clamp(min=1e-6)
+    # Cast to float32: AMP returns fp16 outside autocast; exp(2*log_sigma) can
+    # underflow in fp16.  Clamp matches TrajectoryHead floor: sigma in [0.37, 55] m.
+    mu        = mu.float()
+    log_sigma = log_sigma.float().clamp(-1.0, 4.0)
+    target    = target.float()
+    var = torch.exp(2 * log_sigma)   # in [0.135, 2981] — stable in fp32, no extra clamp
     nll = log_sigma + 0.5 * (target - mu) ** 2 / var
     return nll.mean()
 

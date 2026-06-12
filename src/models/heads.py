@@ -47,8 +47,9 @@ class TrajectoryHead(nn.Module):
             nn.ReLU(),
             nn.Linear(256, T_future * 2),
         )
-        # clamp log_sigma to avoid degenerate distributions
-        self._log_sigma_min = -4.0
+        # sigma in [0.37m, 55m]: floor prevents collapse where model exploits
+        # near-zero training errors to drive log_sigma → -inf while val NLL explodes.
+        self._log_sigma_min = -1.0
         self._log_sigma_max =  4.0
 
     def forward(self, ctx: torch.Tensor):

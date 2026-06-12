@@ -26,7 +26,10 @@ def interval_coverage(mu: torch.Tensor, log_sigma: torch.Tensor,
     Returns:
         empirical coverage fraction in [0, 1]
     """
-    sigma = torch.exp(log_sigma)
+    mu        = mu.float()
+    log_sigma = log_sigma.float().clamp(-1.0, 4.0)
+    target    = target.float()
+    sigma     = torch.exp(log_sigma)
     z = 1.645  # 90% normal quantile
     in_interval = ((target - mu).abs() <= z * sigma).float()
     return float(in_interval.mean())

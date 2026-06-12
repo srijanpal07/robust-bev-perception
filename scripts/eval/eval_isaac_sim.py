@@ -20,7 +20,7 @@ import json
 import yaml
 import torch
 
-from src.models.temporal import TemporalVelocityPredictor
+from src.models.phase1_model import Phase1Model
 from src.data.isaac_sim import IsaacSimDataset
 from src.training.checkpointing import load_checkpoint
 
@@ -42,7 +42,7 @@ def main():
         cfg = yaml.safe_load(f)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = TemporalVelocityPredictor(**cfg['model']).to(device)
+    model = Phase1Model(**cfg["model"]).to(device)
     load_checkpoint(model, args.checkpoint, device=str(device))
     model.eval()
 

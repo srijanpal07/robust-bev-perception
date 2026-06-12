@@ -10,8 +10,8 @@ build/
 .eggs/
 .pytest_cache/
 
-# Model checkpoints and large files
-outputs/checkpoints/
+# All training outputs — checkpoints, logs, caches, plots
+outputs/
 *.pt
 *.pth
 *.ckpt
@@ -26,10 +26,9 @@ datasets/
 *.npz
 
 # Logs and experiment outputs
-outputs/logs/
-outputs/runs/
 wandb/
 *.log
+*.csv
 lightning_logs/
 
 # Jupyter

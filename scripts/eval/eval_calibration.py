@@ -14,7 +14,7 @@ import argparse
 import yaml
 import torch
 
-from src.models.temporal import TemporalVelocityPredictor
+from src.models.phase1_model import Phase1Model
 from src.eval.calibration_metrics import calibration_sweep
 from src.training.checkpointing import load_checkpoint
 from src.data.beam_degradation import BEAM_LEVELS
@@ -34,7 +34,7 @@ def main():
         cfg = yaml.safe_load(f)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = TemporalVelocityPredictor(**cfg['model']).to(device)
+    model = Phase1Model(**cfg["model"]).to(device)
     load_checkpoint(model, args.checkpoint, device=str(device))
     model.eval()
 
